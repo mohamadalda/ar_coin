@@ -21,9 +21,9 @@ class HomeScreen extends StatelessWidget {
               height: 300,
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
-                color: Colors.cyan.withOpacity(0.2),
+                color: const Color(0xFF6A0DAD).withOpacity(0.2),
                 boxShadow: [
-                  BoxShadow(color: Colors.cyan.withOpacity(0.5), blurRadius: 100),
+                  BoxShadow(color: const Color(0xFF6A0DAD).withOpacity(0.5), blurRadius: 100),
                 ],
               ),
             ),
@@ -36,9 +36,9 @@ class HomeScreen extends StatelessWidget {
               height: 250,
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
-                color: Colors.blue.withOpacity(0.2),
+                color: const Color(0xFFD01B98).withOpacity(0.2),
                 boxShadow: [
-                  BoxShadow(color: Colors.blue.withOpacity(0.4), blurRadius: 80),
+                  BoxShadow(color: const Color(0xFFD01B98).withOpacity(0.4), blurRadius: 80),
                 ],
               ),
             ),
@@ -50,10 +50,13 @@ class HomeScreen extends StatelessWidget {
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
                 FadeInDown(
-                  child: const Icon(
-                    Icons.view_in_ar_rounded,
-                    size: 100,
-                    color: Colors.cyanAccent,
+                  child: Hero(
+                    tag: 'logo',
+                    child: Image.asset(
+                      'assets/images/logo.png',
+                      width: 150,
+                      height: 150,
+                    ),
                   ),
                 ),
                 const SizedBox(height: 20),
@@ -62,10 +65,11 @@ class HomeScreen extends StatelessWidget {
                   child: Text(
                     "IMAGO",
                     style: TextStyle(
-                      fontSize: 32,
+                      fontSize: 36,
                       fontWeight: FontWeight.bold,
+                      letterSpacing: 4,
                       color: Colors.white,
-                      shadows: [Shadow(color: Colors.cyan.withOpacity(0.5), blurRadius: 10)],
+                      shadows: [Shadow(color: const Color(0xFF6A0DAD).withOpacity(0.5), blurRadius: 15)],
                     ),
                   ),
                 ),
@@ -99,12 +103,12 @@ class HomeScreen extends StatelessWidget {
                       padding: const EdgeInsets.symmetric(horizontal: 40, vertical: 16),
                       decoration: BoxDecoration(
                         gradient: const LinearGradient(
-                          colors: [Colors.cyan, Colors.blue],
+                          colors: [Color(0xFF6A0DAD), Color(0xFFD01B98)],
                         ),
                         borderRadius: BorderRadius.circular(30),
                         boxShadow: [
                           BoxShadow(
-                            color: Colors.cyan.withOpacity(0.4),
+                            color: const Color(0xFF6A0DAD).withOpacity(0.4),
                             blurRadius: 20,
                             offset: const Offset(0, 10),
                           ),
@@ -113,13 +117,14 @@ class HomeScreen extends StatelessWidget {
                       child: const Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          Icon(Icons.play_arrow_rounded, color: Colors.white, size: 28),
-                          SizedBox(width: 8),
+                          Icon(Icons.camera_alt_rounded, color: Colors.white, size: 28),
+                          SizedBox(width: 12),
                           Text(
-                            "Mulai Scan",
+                            "MULAI SCAN",
                             style: TextStyle(
                               fontSize: 18,
                               fontWeight: FontWeight.bold,
+                              letterSpacing: 1.2,
                               color: Colors.white,
                             ),
                           ),

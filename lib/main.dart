@@ -25,7 +25,13 @@ class ARCoinApp extends StatelessWidget {
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
         brightness: Brightness.dark,
-        primarySwatch: Colors.cyan,
+        primaryColor: const Color(0xFF6A0DAD),
+        colorScheme: ColorScheme.fromSeed(
+          seedColor: const Color(0xFF6A0DAD),
+          primary: const Color(0xFF6A0DAD),
+          secondary: const Color(0xFFD01B98),
+          brightness: Brightness.dark,
+        ),
         textTheme: GoogleFonts.outfitTextTheme(ThemeData.dark().textTheme),
       ),
       home: const HomeScreen(),

@@ -1,13 +1,16 @@
 import 'dart:io';
+import 'dart:math';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show rootBundle;
 import 'package:camera/camera.dart';
 import 'package:animate_do/animate_do.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:google_mlkit_text_recognition/google_mlkit_text_recognition.dart';
+import 'package:google_mlkit_image_labeling/google_mlkit_image_labeling.dart';
+import 'package:audioplayers/audioplayers.dart';
 import '../globals.dart';
 import '../models/hero_model.dart';
-import '../widgets/hero_card.dart';
 
 class ARScannerScreen extends StatefulWidget {
   const ARScannerScreen({super.key});
@@ -17,33 +20,90 @@ class ARScannerScreen extends StatefulWidget {
 }
 
 class _ARScannerScreenState extends State<ARScannerScreen>
-    with SingleTickerProviderStateMixin {
+    with TickerProviderStateMixin {
   CameraController? _controller;
   bool _isCameraInitialized = false;
   bool _showResult = false;
   HeroModel? _scannedHero;
+  String _selectedLang = 'id';
 
-  late AnimationController _animationController;
-  late Animation<double> _scanLineAnimation;
+  // Draggable panel position
+  Offset _panelOffset = Offset.zero;
+  bool _panelPositionInitialized = false;
 
-  // ML Kit Text Recognition
+  // Audio player
+  final AudioPlayer _audioPlayer = AudioPlayer();
+  bool _isPlayingAudio = false;
+
+  // OCR (text recognition)
   final TextRecognizer _textRecognizer = TextRecognizer();
+
+  // Image labeling (untuk koin bergambar seperti Semar)
+  ImageLabeler? _imageLabeler;
+  bool _imageLabelerReady = false;
+
   bool _isBusy = false;
   int _missingFrames = 0;
+  DateTime? _lastProcessedTime;
+
+  // Animasi
+  late AnimationController _pulseController;
+  late AnimationController _rotateController;
+  late AnimationController _lockController;
+  late Animation<double> _lockScale;
 
   @override
   void initState() {
     super.initState();
     _requestPermissionAndInitCamera();
+    _initImageLabeler();
 
-    _animationController = AnimationController(
-      duration: const Duration(seconds: 2),
+    _pulseController = AnimationController(
+      duration: const Duration(milliseconds: 1500),
       vsync: this,
     )..repeat(reverse: true);
 
-    _scanLineAnimation = Tween<double>(begin: 0.0, end: 250.0).animate(
-      CurvedAnimation(parent: _animationController, curve: Curves.easeInOut),
+    _rotateController = AnimationController(
+      duration: const Duration(seconds: 4),
+      vsync: this,
+    )..repeat();
+
+    _lockController = AnimationController(
+      duration: const Duration(milliseconds: 500),
+      vsync: this,
     );
+    _lockScale = Tween<double>(begin: 1.5, end: 1.0).animate(
+      CurvedAnimation(parent: _lockController, curve: Curves.elasticOut),
+    );
+  }
+
+  /// Salin model TFLite dari assets ke temp directory (selalu overwrite untuk mencegah cache lama)
+  Future<String> _getModelPath(String assetFileName) async {
+    final file = File('${Directory.systemTemp.path}/$assetFileName');
+    // Selalu overwrite file lama di cache temp
+    if (await file.exists()) {
+      await file.delete();
+    }
+    final byteData = await rootBundle.load('assets/$assetFileName');
+    await file.writeAsBytes(byteData.buffer.asUint8List(), flush: true);
+    return file.path;
+  }
+
+  /// Inisialisasi image labeler dengan custom TFLite model
+  Future<void> _initImageLabeler() async {
+    try {
+      final modelPath = await _getModelPath('coin_model.tflite');
+      final options = LocalLabelerOptions(
+        modelPath: modelPath,
+        confidenceThreshold: 0.5,
+      );
+      _imageLabeler = ImageLabeler(options: options);
+      _imageLabelerReady = true;
+      debugPrint('✅ Image labeler initialized');
+    } catch (e) {
+      debugPrint('❌ Image labeler init error (OCR only mode): $e');
+      _imageLabelerReady = false;
+    }
   }
 
   Future<void> _requestPermissionAndInitCamera() async {
@@ -59,7 +119,7 @@ class _ARScannerScreenState extends State<ARScannerScreen>
     if (cameras.isEmpty) return;
     _controller = CameraController(
       cameras[0],
-      ResolutionPreset.high, // Resolusi tinggi agar teks lebih terbaca
+      ResolutionPreset.medium,
       enableAudio: false,
       imageFormatGroup: Platform.isAndroid
           ? ImageFormatGroup.nv21
@@ -94,6 +154,14 @@ class _ARScannerScreenState extends State<ARScannerScreen>
     final format = InputImageFormatValue.fromRawValue(image.format.raw);
     if (format == null) return null;
 
+    final totalBytes = image.planes.fold(0, (sum, plane) => sum + plane.bytes.length);
+    final bytes = Uint8List(totalBytes);
+    int offset = 0;
+    for (final plane in image.planes) {
+      bytes.setRange(offset, offset + plane.bytes.length, plane.bytes);
+      offset += plane.bytes.length;
+    }
+
     final metadata = InputImageMetadata(
       size: Size(image.width.toDouble(), image.height.toDouble()),
       rotation: rotation,
@@ -101,18 +169,22 @@ class _ARScannerScreenState extends State<ARScannerScreen>
       bytesPerRow: image.planes[0].bytesPerRow,
     );
 
-    final WriteBuffer allBytes = WriteBuffer();
-    for (final Plane plane in image.planes) {
-      allBytes.putUint8List(plane.bytes);
-    }
-    final bytes = allBytes.done().buffer.asUint8List();
     return InputImage.fromBytes(bytes: bytes, metadata: metadata);
   }
 
-  // ===== PROSES FRAME KAMERA =====
+  String _debugLabel = '';
+
   void _processCameraImage(CameraImage image) async {
-    if (_isBusy) return;
+    if (_isBusy || !mounted) return;
+
+    final now = DateTime.now();
+    if (_lastProcessedTime != null &&
+        now.difference(_lastProcessedTime!).inMilliseconds < 500) {
+      return;
+    }
+
     _isBusy = true;
+    _lastProcessedTime = now;
 
     try {
       final inputImage = _inputImageFromCameraImage(image);
@@ -121,236 +193,676 @@ class _ARScannerScreenState extends State<ARScannerScreen>
         return;
       }
 
-      final recognizedText = await _textRecognizer.processImage(inputImage);
-      final allText = recognizedText.text;
+      HeroModel? hero;
+      String currentDebug = '';
 
-      if (allText.isNotEmpty) {
-        debugPrint('OCR TEXT: $allText');
+      // 1. Coba OCR dulu
+      final recognizedText = await _textRecognizer.processImage(inputImage);
+      hero = _matchCoinByText(recognizedText.text);
+
+      // 2. Jika OCR gagal, coba Image Labeling (untuk koin bergambar)
+      if (hero == null && _imageLabelerReady && _imageLabeler != null) {
+        try {
+          final labels = await _imageLabeler!.processImage(inputImage);
+          if (labels.isNotEmpty) {
+            // Simpan label tertinggi untuk debug UI
+            labels.sort((a, b) => b.confidence.compareTo(a.confidence));
+            currentDebug = '${labels.first.label} (${(labels.first.confidence * 100).toStringAsFixed(0)}%)';
+          }
+          hero = _matchCoinByImage(labels);
+        } catch (e) {
+          debugPrint('⚠️ Image labeling error (skipped): $e');
+          _imageLabelerReady = false;
+        }
       }
 
-      // Cari angka nominal koin di teks yang terbaca
-      final hero = _matchCoinFromText(allText);
+      if (mounted) {
+        if (currentDebug.isNotEmpty && _debugLabel != currentDebug) {
+          setState(() => _debugLabel = currentDebug);
+        }
 
-      if (hero != null && mounted) {
-        _missingFrames = 0;
-        setState(() {
-          _scannedHero = hero;
-          _showResult = true;
-        });
-      } else {
-        _registerMissingFrame();
+        if (hero != null) {
+          _missingFrames = 0;
+          if (!_showResult || _scannedHero != hero) {
+            _lockController.forward(from: 0);
+            setState(() {
+              _scannedHero = hero;
+              _showResult = true;
+            });
+          }
+        } else {
+          _missingFrames++;
+          if (_missingFrames > 10 && _showResult) {
+            setState(() => _showResult = false);
+          }
+        }
       }
     } catch (e) {
-      debugPrint(e.toString());
+      debugPrint("❌ Detection Error: $e");
+    } finally {
+      _isBusy = false;
     }
-
-    _isBusy = false;
   }
 
-  /// Cocokkan teks yang terbaca OCR dengan nominal koin
-  HeroModel? _matchCoinFromText(String text) {
+  /// Mencocokkan koin berdasarkan teks (OCR)
+  HeroModel? _matchCoinByText(String text) {
     if (text.isEmpty) return null;
-
-    // Bersihkan teks: hapus spasi, titik, koma
     final cleaned = text.replaceAll(RegExp(r'[\s.,]'), '').toUpperCase();
+    HeroModel? bestMatch;
+    int bestLen = 0;
 
-    // Cek dari nominal terbesar ke terkecil agar "1000" tidak salah match "100"
-    if (cleaned.contains('1000') || cleaned.contains('1.000')) {
-      debugPrint('MATCHED: Rp 1.000');
-      return mockHeroes[0];
+    for (final hero in mockHeroes) {
+      for (final keyword in hero.keywords) {
+        if (cleaned.contains(keyword) && keyword.length > bestLen) {
+          bestMatch = hero;
+          bestLen = keyword.length;
+        }
+      }
     }
-    if (cleaned.contains('500')) {
-      debugPrint('MATCHED: Rp 500');
-      return mockHeroes[1];
-    }
-    if (cleaned.contains('200')) {
-      debugPrint('MATCHED: Rp 200');
-      return mockHeroes[2];
-    }
-    if (cleaned.contains('100')) {
-      debugPrint('MATCHED: Rp 100');
-      return mockHeroes[3];
-    }
-
-    return null; // Tidak ada nominal yang cocok
+    return bestMatch;
   }
 
-  void _registerMissingFrame() {
-    _missingFrames++;
-    // Hilangkan AR card jika teks tidak terbaca selama 15 frame
-    if (_missingFrames > 15 && _showResult && mounted) {
-      setState(() => _showResult = false);
+  /// Mencocokkan koin berdasarkan gambar (image labeling / classification)
+  HeroModel? _matchCoinByImage(List<ImageLabel> labels) {
+    if (labels.isEmpty) {
+      debugPrint('🔍 No labels detected by Image Labeler');
+    }
+    
+    for (final label in labels) {
+      debugPrint('🔍 Label: "${label.label}" confidence=${label.confidence}');
+      final labelText = label.label.trim().toLowerCase();
+      
+      // Threshold dinaikkan ke 0.85 (85%) untuk menghindari "salah deteksi"
+      // Jika koin lain terdeteksi sebagai Semar, berarti confidence modelnya kurang dari 85%, atau model salah mengenali.
+      if (label.confidence >= 0.85) {
+        
+        // Cek jika label adalah 'background' atau 'class 2' (sering digunakan sbg background di TM)
+        if (labelText.contains('background') || labelText == '1' || labelText == 'class 2') {
+          continue; // Abaikan background
+        }
+
+        for (final hero in mockHeroes) {
+          if (hero.label.isEmpty) continue;
+          final heroLabel = hero.label.toLowerCase();
+          
+          // Skenario 1: Metadata benar
+          if (labelText.contains(heroLabel) || heroLabel.contains(labelText)) {
+            debugPrint('✅ Image match (Skenario 1): ${hero.getName('id')}');
+            return hero;
+          }
+          
+          // Skenario 2: Index TFLite (0) atau default class (class 1)
+          if ((labelText == '0' || labelText == 'class 1') && heroLabel == 'semar') {
+            debugPrint('✅ Image match (Skenario 2/Fallback): ${hero.getName('id')}');
+            return hero;
+          }
+        }
+      }
+    }
+    return null;
+  }
+
+  /// Putar audio saat gambar diklik
+  Future<void> _playHeroAudio(HeroModel hero) async {
+    if (hero.audio.isEmpty) return;
+    try {
+      if (_isPlayingAudio) {
+        await _audioPlayer.stop();
+        setState(() => _isPlayingAudio = false);
+        return;
+      }
+      await _audioPlayer.play(AssetSource(hero.audio));
+      setState(() => _isPlayingAudio = true);
+      _audioPlayer.onPlayerComplete.listen((_) {
+        if (mounted) setState(() => _isPlayingAudio = false);
+      });
+    } catch (e) {
+      debugPrint('❌ Audio error: $e');
+      setState(() => _isPlayingAudio = false);
     }
   }
 
   @override
   void dispose() {
     _textRecognizer.close();
+    _imageLabeler?.close();
+    _audioPlayer.dispose();
     _controller?.stopImageStream();
     _controller?.dispose();
-    _animationController.dispose();
+    _pulseController.dispose();
+    _rotateController.dispose();
+    _lockController.dispose();
     super.dispose();
   }
 
-  // ===== BUILD UI =====
   @override
   Widget build(BuildContext context) {
+    // Inisialisasi posisi panel di tengah layar (sekali saja)
+    if (!_panelPositionInitialized) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        final size = MediaQuery.of(context).size;
+        setState(() {
+          _panelOffset = Offset(
+            (size.width - 300) / 2, // Lebar panel ~300
+            (size.height - 200) / 2, // Tinggi panel ~200
+          );
+          _panelPositionInitialized = true;
+        });
+      });
+    }
+
     return Scaffold(
       backgroundColor: Colors.black,
       body: Stack(
         fit: StackFit.expand,
         children: [
-          // 1. Camera Preview
+          // LAYER 1: Camera
           if (_isCameraInitialized && _controller != null)
-            _buildCameraPreview()
+            _buildCamera()
           else
-            const Center(child: CircularProgressIndicator(color: Colors.cyan)),
+            const Center(child: CircularProgressIndicator(color: Color(0xFF6A0DAD))),
 
-          // 2. Scanner overlay (tampil saat belum ada hasil)
-          if (!_showResult) _buildScannerUI(),
+          // LAYER 2: AR targeting ring (tengah)
+          _buildARTargeting(),
 
-          // 3. AR Hero Card (tampil saat koin terbaca)
-          if (_showResult && _scannedHero != null)
-            Center(
-              child: SafeArea(
-                child: Padding(
-                  padding: const EdgeInsets.all(20.0),
-                  child: ZoomIn(
-                    duration: const Duration(milliseconds: 300),
-                    child: HeroCard(hero: _scannedHero!),
+          // LAYER 3: Draggable info panel
+          if (_showResult && _scannedHero != null) _buildDraggablePanel(),
+
+          // LAYER 4: Top HUD
+          Column(
+            children: [
+              _buildHUD(),
+              if (!_showResult && _debugLabel.isNotEmpty)
+                Container(
+                  margin: const EdgeInsets.only(top: 8),
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                  decoration: BoxDecoration(
+                    color: Colors.black54,
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Text(
+                    'AI sees: $_debugLabel',
+                    style: const TextStyle(color: Colors.white70, fontSize: 12),
                   ),
                 ),
-              ),
-            ),
-
-          // Tombol Back
-          SafeArea(
-            child: Align(
-              alignment: Alignment.topLeft,
-              child: IconButton(
-                icon: const Icon(Icons.arrow_back_ios_new,
-                    color: Colors.white,
-                    shadows: [Shadow(color: Colors.black, blurRadius: 10)]),
-                onPressed: () => Navigator.pop(context),
-              ),
-            ),
+            ],
           ),
         ],
       ),
     );
   }
 
-  Widget _buildCameraPreview() {
-    final previewSize = _controller!.value.previewSize;
-    if (previewSize == null) {
-      return const Center(child: CircularProgressIndicator(color: Colors.cyan));
+  Widget _buildCamera() {
+    if (_controller == null || !_controller!.value.isInitialized) {
+      return const SizedBox();
     }
     return SizedBox.expand(
-      child: FittedBox(
-        fit: BoxFit.cover,
-        clipBehavior: Clip.hardEdge,
-        child: SizedBox(
-          width: previewSize.height,
-          height: previewSize.width,
-          child: CameraPreview(_controller!),
-        ),
+      child: CameraPreview(_controller!),
+    );
+  }
+
+  // ===== AR TARGETING (ring di tengah) =====
+  Widget _buildARTargeting() {
+    return Center(
+      child: AnimatedBuilder(
+        animation: Listenable.merge(
+            [_pulseController, _rotateController, _lockController]),
+        builder: (context, _) {
+          final pulseVal =
+              Tween<double>(begin: 0.85, end: 1.15).evaluate(_pulseController);
+          final rotateVal = _rotateController.value * 2 * pi;
+
+          if (_showResult) {
+            return Transform.scale(
+              scale: _lockScale.value,
+              child: SizedBox(
+                width: 160,
+                height: 160,
+                child: CustomPaint(
+                  painter: _LockedRingPainter(rotation: rotateVal),
+                ),
+              ),
+            );
+          } else {
+            return Transform.scale(
+              scale: pulseVal,
+              child: Transform.rotate(
+                angle: rotateVal,
+                child: SizedBox(
+                  width: 140,
+                  height: 140,
+                  child: CustomPaint(
+                    painter: _ScanRingPainter(progress: rotateVal),
+                  ),
+                ),
+              ),
+            );
+          }
+        },
       ),
     );
   }
 
-  Widget _buildScannerUI() {
-    return SafeArea(
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: [
-          const SizedBox(height: 48),
-          Center(
-            child: SizedBox(
-              width: 250,
-              height: 250,
-              child: Stack(
-                children: [
-                  _buildCorner(Alignment.topLeft),
-                  _buildCorner(Alignment.topRight),
-                  _buildCorner(Alignment.bottomLeft),
-                  _buildCorner(Alignment.bottomRight),
-                  AnimatedBuilder(
-                    animation: _scanLineAnimation,
-                    builder: (context, child) {
-                      return Positioned(
-                        top: _scanLineAnimation.value,
-                        left: 0,
-                        right: 0,
-                        child: Container(
-                          height: 3,
-                          decoration: BoxDecoration(
-                            color: Colors.cyan,
-                            boxShadow: [
-                              BoxShadow(
-                                color: Colors.cyan.withOpacity(0.8),
-                                blurRadius: 10,
-                                spreadRadius: 2,
-                              ),
-                            ],
+  // ===== DRAGGABLE INFO PANEL =====
+  Widget _buildDraggablePanel() {
+    final hero = _scannedHero!;
+    return Positioned(
+      left: _panelOffset.dx,
+      top: _panelOffset.dy,
+      child: GestureDetector(
+        onPanUpdate: (details) {
+          setState(() {
+            _panelOffset += details.delta;
+          });
+        },
+        child: FadeInUp(
+          duration: const Duration(milliseconds: 400),
+          child: Container(
+            width: 280,
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+              color: const Color(0xFF0A0E27).withOpacity(0.92),
+              borderRadius: BorderRadius.circular(24),
+              border: Border.all(
+                color: const Color(0xFF6A0DAD).withOpacity(0.3),
+                width: 1.5,
+              ),
+              boxShadow: [
+                BoxShadow(
+                  color: const Color(0xFF6A0DAD).withOpacity(0.15),
+                  blurRadius: 30,
+                  spreadRadius: 5,
+                ),
+              ],
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                // Drag handle
+                Container(
+                  width: 40,
+                  height: 4,
+                  margin: const EdgeInsets.only(bottom: 12),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF6A0DAD).withOpacity(0.5),
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+
+                // Foto pahlawan (KLIK untuk audio)
+                GestureDetector(
+                  onTap: () => _playHeroAudio(hero),
+                  child: Stack(
+                    alignment: Alignment.center,
+                    children: [
+                      Container(
+                        width: 90,
+                        height: 90,
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          border: Border.all(
+                            color: _isPlayingAudio ? Colors.greenAccent : const Color(0xFF6A0DAD),
+                            width: 2.5,
+                          ),
+                          boxShadow: [
+                            BoxShadow(
+                              color: (_isPlayingAudio
+                                      ? Colors.greenAccent
+                                      : const Color(0xFF6A0DAD))
+                                  .withOpacity(0.5),
+                              blurRadius: 20,
+                              spreadRadius: 3,
+                            ),
+                          ],
+                        ),
+                        child: ClipOval(
+                          child: Image.asset(
+                            hero.image,
+                            fit: BoxFit.cover,
+                            errorBuilder: (_, __, ___) => Container(
+                              color: Colors.blueGrey[900],
+                              child: const Icon(Icons.person,
+                                  size: 40, color: Colors.grey),
+                            ),
                           ),
                         ),
-                      );
-                    },
+                      ),
+                      // Ikon audio overlay
+                      Positioned(
+                        bottom: 0,
+                        right: 0,
+                        child: Container(
+                          padding: const EdgeInsets.all(4),
+                          decoration: BoxDecoration(
+                            color: _isPlayingAudio
+                                ? Colors.greenAccent
+                                : const Color(0xFFD01B98),
+                            shape: BoxShape.circle,
+                          ),
+                          child: Icon(
+                            _isPlayingAudio
+                                ? Icons.stop_rounded
+                                : Icons.volume_up_rounded,
+                            size: 16,
+                            color: Colors.white,
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
-                ],
-              ),
-            ),
-          ),
-          Padding(
-            padding: const EdgeInsets.only(bottom: 40.0),
-            child: Column(
-              children: [
-                const CircularProgressIndicator(
-                    color: Colors.cyan, strokeWidth: 2),
-                const SizedBox(height: 12),
+                ),
+
+                const SizedBox(height: 10),
+
+                // Badge nominal
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 10, vertical: 3),
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      colors: [
+                        const Color(0xFF6A0DAD).withOpacity(0.3),
+                        const Color(0xFFD01B98).withOpacity(0.2),
+                      ],
+                    ),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Text(
+                    hero.getCoin(_selectedLang),
+                    style: const TextStyle(
+                      color: Color(0xFFD01B98),
+                      fontSize: 11,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 6),
+
+                // Nama
                 Text(
-                  "Arahkan angka pada koin ke kamera...",
-                  style: TextStyle(
-                    color: Colors.white.withOpacity(0.9),
-                    fontSize: 14,
+                  hero.getName(_selectedLang),
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 15,
                     fontWeight: FontWeight.bold,
+                  ),
+                ),
+                const SizedBox(height: 4),
+
+                // Deskripsi
+                Text(
+                  hero.getDescription(_selectedLang),
+                  textAlign: TextAlign.center,
+                  maxLines: 3,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: Colors.white.withOpacity(0.7),
+                    fontSize: 11,
+                    height: 1.3,
+                  ),
+                ),
+
+                // Hint: klik untuk audio
+                const SizedBox(height: 8),
+                Text(
+                  _selectedLang == 'id'
+                      ? '🔊 Ketuk gambar untuk mendengar'
+                      : '🔊 Tap image to listen',
+                  style: TextStyle(
+                    color: const Color(0xFFD01B98).withOpacity(0.6),
+                    fontSize: 9,
+                    fontStyle: FontStyle.italic,
                   ),
                 ),
               ],
             ),
           ),
-        ],
+        ),
       ),
     );
   }
 
-  Widget _buildCorner(Alignment alignment) {
-    return Align(
-      alignment: alignment,
-      child: Container(
-        width: 40,
-        height: 40,
+  // ===== HUD (top bar) =====
+  Widget _buildHUD() {
+    return SafeArea(
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+        child: Row(
+          children: [
+            IconButton(
+              icon: const Icon(Icons.arrow_back_ios_new,
+                  color: Colors.white,
+                  shadows: [Shadow(color: Colors.black, blurRadius: 10)]),
+              onPressed: () => Navigator.pop(context),
+            ),
+            const Spacer(),
+            // Language Switcher
+            Container(
+              decoration: BoxDecoration(
+                color: Colors.black.withOpacity(0.4),
+                borderRadius: BorderRadius.circular(20),
+                border: Border.all(color: Colors.white24),
+              ),
+              child: Row(
+                children: [
+                  _langBtn('id', 'ID'),
+                  _langBtn('en', 'EN'),
+                ],
+              ),
+            ),
+            const SizedBox(width: 12),
+            // Status indicator
+            AnimatedContainer(
+              duration: const Duration(milliseconds: 300),
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+              decoration: BoxDecoration(
+                color: _showResult
+                    ? const Color(0xFFD01B98).withOpacity(0.6)
+                    : Colors.black.withOpacity(0.4),
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(
+                  color: _showResult
+                      ? const Color(0xFFD01B98).withOpacity(0.5)
+                      : const Color(0xFF6A0DAD).withOpacity(0.4),
+                ),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(
+                    _showResult ? Icons.check_circle : Icons.view_in_ar,
+                    color: Colors.white,
+                    size: 14,
+                  ),
+                  const SizedBox(width: 6),
+                  Text(
+                    _showResult
+                        ? (_selectedLang == 'id' ? "Terdeteksi" : "Detected")
+                        : (_selectedLang == 'id' ? "Scanning..." : "Scanning..."),
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 11,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _langBtn(String code, String label) {
+    bool isSelected = _selectedLang == code;
+    return GestureDetector(
+      onTap: () => setState(() => _selectedLang = code),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 200),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
         decoration: BoxDecoration(
-          border: Border(
-            top: (alignment == Alignment.topLeft ||
-                    alignment == Alignment.topRight)
-                ? const BorderSide(color: Colors.cyan, width: 4)
-                : BorderSide.none,
-            bottom: (alignment == Alignment.bottomLeft ||
-                    alignment == Alignment.bottomRight)
-                ? const BorderSide(color: Colors.cyan, width: 4)
-                : BorderSide.none,
-            left: (alignment == Alignment.topLeft ||
-                    alignment == Alignment.bottomLeft)
-                ? const BorderSide(color: Colors.cyan, width: 4)
-                : BorderSide.none,
-            right: (alignment == Alignment.topRight ||
-                    alignment == Alignment.bottomRight)
-                ? const BorderSide(color: Colors.cyan, width: 4)
-                : BorderSide.none,
+          color: isSelected ? const Color(0xFF6A0DAD) : Colors.transparent,
+          borderRadius: BorderRadius.circular(20),
+        ),
+        child: Text(
+          label,
+          style: TextStyle(
+            color: isSelected ? Colors.black : Colors.white,
+            fontSize: 10,
+            fontWeight: FontWeight.bold,
           ),
         ),
       ),
     );
   }
+}
+
+// ===== SCAN RING PAINTER (saat belum mendeteksi) =====
+class _ScanRingPainter extends CustomPainter {
+  final double progress;
+  _ScanRingPainter({required this.progress});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final center = Offset(size.width / 2, size.height / 2);
+    final radius = size.width / 2 - 6;
+
+    // Outer ring tipis
+    canvas.drawCircle(
+      center,
+      radius + 8,
+      Paint()
+        ..color = const Color(0xFF6A0DAD).withOpacity(0.15)
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 1,
+    );
+
+    // Arc segment utama
+    final arcPaint = Paint()
+      ..color = const Color(0xFFD01B98)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 2.5
+      ..strokeCap = StrokeCap.round;
+
+    final rect = Rect.fromCircle(center: center, radius: radius);
+    canvas.drawArc(rect, progress, pi * 0.6, false, arcPaint);
+    canvas.drawArc(rect, progress + pi, pi * 0.4, false, arcPaint);
+
+    // Crosshair kecil di tengah
+    final crossPaint = Paint()
+      ..color = const Color(0xFF6A0DAD).withOpacity(0.5)
+      ..strokeWidth = 1;
+    canvas.drawLine(Offset(center.dx - 10, center.dy),
+        Offset(center.dx + 10, center.dy), crossPaint);
+    canvas.drawLine(Offset(center.dx, center.dy - 10),
+        Offset(center.dx, center.dy + 10), crossPaint);
+
+    // 4 corner brackets
+    _drawCorner(canvas, center, radius, 0);
+    _drawCorner(canvas, center, radius, pi / 2);
+    _drawCorner(canvas, center, radius, pi);
+    _drawCorner(canvas, center, radius, 3 * pi / 2);
+  }
+
+  void _drawCorner(Canvas canvas, Offset center, double radius, double angle) {
+    final len = 12.0;
+    final paint = Paint()
+      ..color = const Color(0xFF6A0DAD).withOpacity(0.4)
+      ..strokeWidth = 2
+      ..strokeCap = StrokeCap.round;
+
+    final p = Offset(
+      center.dx + radius * cos(angle),
+      center.dy + radius * sin(angle),
+    );
+
+    canvas.drawLine(
+      p,
+      Offset(p.dx + len * cos(angle + pi / 4), p.dy + len * sin(angle + pi / 4)),
+      paint,
+    );
+    canvas.drawLine(
+      p,
+      Offset(p.dx + len * cos(angle - pi / 4), p.dy + len * sin(angle - pi / 4)),
+      paint,
+    );
+  }
+
+  @override
+  bool shouldRepaint(covariant _ScanRingPainter old) => true;
+}
+
+// ===== LOCKED RING PAINTER (saat terdeteksi) =====
+class _LockedRingPainter extends CustomPainter {
+  final double rotation;
+  _LockedRingPainter({required this.rotation});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final center = Offset(size.width / 2, size.height / 2);
+    final radius = size.width / 2 - 6;
+
+    // Glow circle
+    canvas.drawCircle(
+      center,
+      radius - 5,
+      Paint()
+        ..color = const Color(0xFFD01B98).withOpacity(0.08)
+        ..style = PaintingStyle.fill,
+    );
+
+    // Ring magenta solid
+    canvas.drawCircle(
+      center,
+      radius,
+      Paint()
+        ..color = const Color(0xFFD01B98).withOpacity(0.6)
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 2.5,
+    );
+
+    // Ring luar tipis
+    canvas.drawCircle(
+      center,
+      radius + 10,
+      Paint()
+        ..color = const Color(0xFF6A0DAD).withOpacity(0.2)
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 1,
+    );
+
+    // Rotating accent arc
+    final arcPaint = Paint()
+      ..color = const Color(0xFFD01B98)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 3
+      ..strokeCap = StrokeCap.round;
+    final rect = Rect.fromCircle(center: center, radius: radius + 10);
+    canvas.drawArc(rect, rotation, pi / 3, false, arcPaint);
+
+    // Crosshair
+    final crossPaint = Paint()
+      ..color = const Color(0xFFD01B98).withOpacity(0.6)
+      ..strokeWidth = 1;
+    canvas.drawLine(Offset(center.dx - 15, center.dy),
+        Offset(center.dx - 5, center.dy), crossPaint);
+    canvas.drawLine(Offset(center.dx + 5, center.dy),
+        Offset(center.dx + 15, center.dy), crossPaint);
+    canvas.drawLine(Offset(center.dx, center.dy - 15),
+        Offset(center.dx, center.dy - 5), crossPaint);
+    canvas.drawLine(Offset(center.dx, center.dy + 5),
+        Offset(center.dx, center.dy + 15), crossPaint);
+
+    // Center dot
+    canvas.drawCircle(
+      center,
+      3,
+      Paint()..color = const Color(0xFFD01B98),
+    );
+  }
+
+  @override
+  bool shouldRepaint(covariant _LockedRingPainter old) => true;
 }
