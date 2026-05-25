@@ -1,6 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:animate_do/animate_do.dart';
 import 'scanner_screen.dart';
+import 'admin_screen.dart';
+import 'login_screen.dart';
+import '../utils/language_manager.dart';
+import '../utils/auth_service.dart';
 
 class HomeScreen extends StatelessWidget {
   const HomeScreen({super.key});
@@ -44,6 +48,85 @@ class HomeScreen extends StatelessWidget {
             ),
           ),
           
+          // Top controls: Language Dropdown and Login/Logout Button
+          Positioned(
+            top: 40,
+            right: 20,
+            child: Row(
+              children: [
+                // Language Dropdown
+                ValueListenableBuilder<String>(
+                  valueListenable: LanguageManager.currentLanguage,
+                  builder: (context, currentLang, _) {
+                    return Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: Colors.white.withOpacity(0.1),
+                        borderRadius: BorderRadius.circular(20),
+                        border: Border.all(color: Colors.white24),
+                      ),
+                      child: DropdownButtonHideUnderline(
+                        child: DropdownButton<String>(
+                          value: currentLang,
+                          dropdownColor: const Color(0xFF1E293B),
+                          icon: const Icon(Icons.language, color: Colors.white70, size: 18),
+                          style: const TextStyle(color: Colors.white, fontSize: 13),
+                          items: LanguageManager.supportedLanguages.map((lang) {
+                            return DropdownMenuItem<String>(
+                              value: lang['code'],
+                              child: Text(lang['name']!),
+                            );
+                          }).toList(),
+                          onChanged: (newLang) {
+                            if (newLang != null) {
+                              LanguageManager.changeLanguage(newLang, context);
+                            }
+                          },
+                        ),
+                      ),
+                    );
+                  }
+                ),
+                const SizedBox(width: 12),
+                
+                // Login/Logout Button
+                ValueListenableBuilder<bool>(
+                  valueListenable: AuthService.isLoggedIn,
+                  builder: (context, isLoggedIn, _) {
+                    return GestureDetector(
+                      onTap: () {
+                        if (isLoggedIn) {
+                          AuthService.logout();
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(content: Text('Berhasil logout')),
+                          );
+                        } else {
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(builder: (context) => const LoginScreen()),
+                          );
+                        }
+                      },
+                      child: Container(
+                        padding: const EdgeInsets.all(10),
+                        decoration: BoxDecoration(
+                          color: isLoggedIn ? Colors.red.withOpacity(0.2) : Colors.white.withOpacity(0.1),
+                          shape: BoxShape.circle,
+                          border: Border.all(color: isLoggedIn ? Colors.red.withOpacity(0.5) : Colors.white24),
+                        ),
+                        child: Icon(
+                          isLoggedIn ? Icons.logout : Icons.person,
+                          color: isLoggedIn ? Colors.redAccent : Colors.white70,
+                          size: 20,
+                        ),
+                      ),
+                    );
+                  }
+                ),
+              ],
+            ),
+          ),
+
           // Konten Utama
           SafeArea(
             child: Column(
@@ -78,14 +161,22 @@ class HomeScreen extends StatelessWidget {
                   delay: const Duration(milliseconds: 400),
                   child: Padding(
                     padding: const EdgeInsets.symmetric(horizontal: 40.0),
-                    child: Text(
-                      "Scan fisik uang koin Rupiah untuk melihat profil Pahlawan Nasional dalam format Augmented Reality.",
-                      textAlign: TextAlign.center,
-                      style: TextStyle(
-                        fontSize: 16,
-                        color: Colors.white.withOpacity(0.7),
-                        height: 1.5,
-                      ),
+                    child: ValueListenableBuilder<String>(
+                      valueListenable: LanguageManager.currentLanguage,
+                      builder: (context, lang, _) {
+                        return Text(
+                          lang == 'id' 
+                              ? "Scan fisik koin untuk melihat profil Tokoh dalam format Augmented Reality."
+                              : (lang == 'en' ? "Scan coins to view Figures profiles in Augmented Reality format."
+                              : "Scan coins to view figures in AR."), // Fallback sederhana, karena terjemahan UI statis tidak ikut API translation di mockHeroes
+                          textAlign: TextAlign.center,
+                          style: TextStyle(
+                            fontSize: 16,
+                            color: Colors.white.withOpacity(0.7),
+                            height: 1.5,
+                          ),
+                        );
+                      }
                     ),
                   ),
                 ),
@@ -133,6 +224,50 @@ class HomeScreen extends StatelessWidget {
                     ),
                   ),
                 ),
+                const SizedBox(height: 20),
+                // Settings Button (Admin Only)
+                ValueListenableBuilder<bool>(
+                  valueListenable: AuthService.isLoggedIn,
+                  builder: (context, isLoggedIn, _) {
+                    if (!isLoggedIn) return const SizedBox.shrink();
+                    
+                    return FadeInUp(
+                      delay: const Duration(milliseconds: 700),
+                      child: GestureDetector(
+                        onTap: () {
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(builder: (context) => const AdminScreen()),
+                          );
+                        },
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                          decoration: BoxDecoration(
+                            color: Colors.white.withOpacity(0.1),
+                            borderRadius: BorderRadius.circular(20),
+                            border: Border.all(color: Colors.white24),
+                          ),
+                          child: const Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(Icons.settings, color: Colors.white70, size: 20),
+                              SizedBox(width: 10),
+                              Text(
+                                "PENGATURAN HERO",
+                                style: TextStyle(
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w600,
+                                  letterSpacing: 1.0,
+                                  color: Colors.white70,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    );
+                  }
+                ),
               ],
             ),
           ),
@@ -141,3 +276,4 @@ class HomeScreen extends StatelessWidget {
     );
   }
 }
+

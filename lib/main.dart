@@ -4,6 +4,8 @@ import 'package:camera/camera.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'globals.dart';
 import 'screens/home_screen.dart';
+import 'models/hero_model.dart';
+import 'utils/auth_service.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -12,6 +14,13 @@ Future<void> main() async {
   } on CameraException catch (e) {
     debugPrint('Error: ${e.code}\nError Message: ${e.description}');
   }
+  
+  // Load heroes data from JSON
+  await loadHeroes();
+
+  // Initialize auth state
+  await AuthService.init();
+  
   runApp(const ARCoinApp());
 }
 

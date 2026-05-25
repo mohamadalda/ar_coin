@@ -1,16 +1,18 @@
-import 'dart:io';
+import 'dart:async';
 import 'dart:math';
-import 'package:flutter/foundation.dart';
+import 'dart:io';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart' show rootBundle;
 import 'package:camera/camera.dart';
+import 'package:google_mlkit_image_labeling/google_mlkit_image_labeling.dart';
+import 'package:google_mlkit_text_recognition/google_mlkit_text_recognition.dart';
+import 'package:audioplayers/audioplayers.dart';
+import 'package:flutter/services.dart';
 import 'package:animate_do/animate_do.dart';
 import 'package:permission_handler/permission_handler.dart';
-import 'package:google_mlkit_text_recognition/google_mlkit_text_recognition.dart';
-import 'package:google_mlkit_image_labeling/google_mlkit_image_labeling.dart';
-import 'package:audioplayers/audioplayers.dart';
 import '../globals.dart';
 import '../models/hero_model.dart';
+import '../utils/file_helper.dart';
+import '../utils/language_manager.dart';
 
 class ARScannerScreen extends StatefulWidget {
   const ARScannerScreen({super.key});
@@ -25,7 +27,6 @@ class _ARScannerScreenState extends State<ARScannerScreen>
   bool _isCameraInitialized = false;
   bool _showResult = false;
   HeroModel? _scannedHero;
-  String _selectedLang = 'id';
 
   // Draggable panel position
   Offset _panelOffset = Offset.zero;
@@ -223,18 +224,20 @@ class _ARScannerScreenState extends State<ARScannerScreen>
 
         if (hero != null) {
           _missingFrames = 0;
-          if (!_showResult || _scannedHero != hero) {
-            _lockController.forward(from: 0);
+          if (_scannedHero == null || _scannedHero!.name['id'] != hero.name['id']) {
             setState(() {
               _scannedHero = hero;
               _showResult = true;
             });
+            _lockController.forward(from: 0);
+            if (mounted) {
+              debugPrint('✅ Image match (Skenario 1): ${hero.getName(LanguageManager.currentLanguage.value)}');
+              _playHeroAudio(hero);
+            }
           }
         } else {
           _missingFrames++;
-          if (_missingFrames > 10 && _showResult) {
-            setState(() => _showResult = false);
-          }
+          // AR panel now persists until user manually closes it.
         }
       }
     } catch (e) {
@@ -311,7 +314,11 @@ class _ARScannerScreenState extends State<ARScannerScreen>
         setState(() => _isPlayingAudio = false);
         return;
       }
-      await _audioPlayer.play(AssetSource(hero.audio));
+      if (FileHelper.isLocalFile(hero.audio)) {
+        await _audioPlayer.play(DeviceFileSource(hero.audio));
+      } else {
+        await _audioPlayer.play(AssetSource(hero.audio));
+      }
       setState(() => _isPlayingAudio = true);
       _audioPlayer.onPlayerComplete.listen((_) {
         if (mounted) setState(() => _isPlayingAudio = false);
@@ -478,15 +485,43 @@ class _ARScannerScreenState extends State<ARScannerScreen>
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                // Drag handle
-                Container(
-                  width: 40,
-                  height: 4,
-                  margin: const EdgeInsets.only(bottom: 12),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFF6A0DAD).withOpacity(0.5),
-                    borderRadius: BorderRadius.circular(2),
-                  ),
+                // Drag handle & Close Button
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const SizedBox(width: 24), // Placeholder untuk balance layout
+                    Container(
+                      width: 40,
+                      height: 4,
+                      margin: const EdgeInsets.only(bottom: 12),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF6A0DAD).withOpacity(0.5),
+                        borderRadius: BorderRadius.circular(2),
+                      ),
+                    ),
+                    GestureDetector(
+                      onTap: () {
+                        setState(() {
+                          _showResult = false;
+                          _scannedHero = null;
+                        });
+                        if (_isPlayingAudio) {
+                          _audioPlayer.stop();
+                          setState(() => _isPlayingAudio = false);
+                        }
+                      },
+                      child: Container(
+                        padding: const EdgeInsets.all(4),
+                        margin: const EdgeInsets.only(bottom: 12),
+                        decoration: BoxDecoration(
+                          color: Colors.white.withOpacity(0.1),
+                          shape: BoxShape.circle,
+                        ),
+                        child: const Icon(Icons.close, color: Colors.white70, size: 16),
+                      ),
+                    ),
+                  ],
                 ),
 
                 // Foto pahlawan (KLIK untuk audio)
@@ -516,15 +551,25 @@ class _ARScannerScreenState extends State<ARScannerScreen>
                           ],
                         ),
                         child: ClipOval(
-                          child: Image.asset(
-                            hero.image,
-                            fit: BoxFit.cover,
-                            errorBuilder: (_, __, ___) => Container(
-                              color: Colors.blueGrey[900],
-                              child: const Icon(Icons.person,
-                                  size: 40, color: Colors.grey),
-                            ),
-                          ),
+                          child: FileHelper.isLocalFile(hero.image)
+                              ? Image.file(
+                                  File(hero.image),
+                                  fit: BoxFit.cover,
+                                  errorBuilder: (_, __, ___) => Container(
+                                    color: Colors.blueGrey[900],
+                                    child: const Icon(Icons.person,
+                                        size: 40, color: Colors.grey),
+                                  ),
+                                )
+                              : Image.asset(
+                                  hero.image,
+                                  fit: BoxFit.cover,
+                                  errorBuilder: (_, __, ___) => Container(
+                                    color: Colors.blueGrey[900],
+                                    child: const Icon(Icons.person,
+                                        size: 40, color: Colors.grey),
+                                  ),
+                                ),
                         ),
                       ),
                       // Ikon audio overlay
@@ -567,53 +612,73 @@ class _ARScannerScreenState extends State<ARScannerScreen>
                     ),
                     borderRadius: BorderRadius.circular(8),
                   ),
-                  child: Text(
-                    hero.getCoin(_selectedLang),
-                    style: const TextStyle(
-                      color: Color(0xFFD01B98),
-                      fontSize: 11,
-                      fontWeight: FontWeight.bold,
-                    ),
+                  child: ValueListenableBuilder<String>(
+                    valueListenable: LanguageManager.currentLanguage,
+                    builder: (context, lang, _) {
+                      return Text(
+                        hero.getCoin(lang),
+                        style: const TextStyle(
+                          color: Color(0xFFD01B98),
+                          fontSize: 11,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      );
+                    }
                   ),
                 ),
                 const SizedBox(height: 6),
 
                 // Nama
-                Text(
-                  hero.getName(_selectedLang),
-                  textAlign: TextAlign.center,
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 15,
-                    fontWeight: FontWeight.bold,
-                  ),
+                ValueListenableBuilder<String>(
+                  valueListenable: LanguageManager.currentLanguage,
+                  builder: (context, lang, _) {
+                    return Text(
+                      hero.getName(lang),
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 15,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    );
+                  }
                 ),
                 const SizedBox(height: 4),
 
                 // Deskripsi
-                Text(
-                  hero.getDescription(_selectedLang),
-                  textAlign: TextAlign.center,
-                  maxLines: 3,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    color: Colors.white.withOpacity(0.7),
-                    fontSize: 11,
-                    height: 1.3,
-                  ),
+                ValueListenableBuilder<String>(
+                  valueListenable: LanguageManager.currentLanguage,
+                  builder: (context, lang, _) {
+                    return Text(
+                      hero.getDescription(lang),
+                      textAlign: TextAlign.center,
+                      maxLines: 3,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        color: Colors.white.withOpacity(0.7),
+                        fontSize: 11,
+                        height: 1.3,
+                      ),
+                    );
+                  }
                 ),
 
                 // Hint: klik untuk audio
                 const SizedBox(height: 8),
-                Text(
-                  _selectedLang == 'id'
-                      ? '🔊 Ketuk gambar untuk mendengar'
-                      : '🔊 Tap image to listen',
-                  style: TextStyle(
-                    color: const Color(0xFFD01B98).withOpacity(0.6),
-                    fontSize: 9,
-                    fontStyle: FontStyle.italic,
-                  ),
+                ValueListenableBuilder<String>(
+                  valueListenable: LanguageManager.currentLanguage,
+                  builder: (context, lang, _) {
+                    return Text(
+                      lang == 'id'
+                          ? '🔊 Ketuk gambar untuk mendengar'
+                          : '🔊 Tap image to listen',
+                      style: TextStyle(
+                        color: const Color(0xFFD01B98).withOpacity(0.6),
+                        fontSize: 9,
+                        fontStyle: FontStyle.italic,
+                      ),
+                    );
+                  }
                 ),
               ],
             ),
@@ -638,56 +703,81 @@ class _ARScannerScreenState extends State<ARScannerScreen>
             ),
             const Spacer(),
             // Language Switcher
-            Container(
-              decoration: BoxDecoration(
-                color: Colors.black.withOpacity(0.4),
-                borderRadius: BorderRadius.circular(20),
-                border: Border.all(color: Colors.white24),
-              ),
-              child: Row(
-                children: [
-                  _langBtn('id', 'ID'),
-                  _langBtn('en', 'EN'),
-                ],
-              ),
+            ValueListenableBuilder<String>(
+              valueListenable: LanguageManager.currentLanguage,
+              builder: (context, currentLang, _) {
+                return Container(
+                  height: 32,
+                  padding: const EdgeInsets.symmetric(horizontal: 8),
+                  decoration: BoxDecoration(
+                    color: Colors.black.withOpacity(0.4),
+                    borderRadius: BorderRadius.circular(20),
+                    border: Border.all(color: Colors.white24),
+                  ),
+                  child: DropdownButtonHideUnderline(
+                    child: DropdownButton<String>(
+                      value: currentLang,
+                      dropdownColor: const Color(0xFF1E293B),
+                      icon: const Icon(Icons.language, color: Colors.white70, size: 16),
+                      style: const TextStyle(color: Colors.white, fontSize: 12),
+                      items: LanguageManager.supportedLanguages.map((lang) {
+                        return DropdownMenuItem<String>(
+                          value: lang['code'],
+                          child: Text(lang['name']!),
+                        );
+                      }).toList(),
+                      onChanged: (newLang) {
+                        if (newLang != null) {
+                          LanguageManager.changeLanguage(newLang, context);
+                        }
+                      },
+                    ),
+                  ),
+                );
+              }
             ),
             const SizedBox(width: 12),
             // Status indicator
-            AnimatedContainer(
-              duration: const Duration(milliseconds: 300),
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-              decoration: BoxDecoration(
-                color: _showResult
-                    ? const Color(0xFFD01B98).withOpacity(0.6)
-                    : Colors.black.withOpacity(0.4),
-                borderRadius: BorderRadius.circular(16),
-                border: Border.all(
-                  color: _showResult
-                      ? const Color(0xFFD01B98).withOpacity(0.5)
-                      : const Color(0xFF6A0DAD).withOpacity(0.4),
-                ),
-              ),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(
-                    _showResult ? Icons.check_circle : Icons.view_in_ar,
-                    color: Colors.white,
-                    size: 14,
-                  ),
-                  const SizedBox(width: 6),
-                  Text(
-                    _showResult
-                        ? (_selectedLang == 'id' ? "Terdeteksi" : "Detected")
-                        : (_selectedLang == 'id' ? "Scanning..." : "Scanning..."),
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 11,
-                      fontWeight: FontWeight.bold,
+            ValueListenableBuilder<String>(
+              valueListenable: LanguageManager.currentLanguage,
+              builder: (context, currentLang, _) {
+                return AnimatedContainer(
+                  duration: const Duration(milliseconds: 300),
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                  decoration: BoxDecoration(
+                    color: _showResult
+                        ? const Color(0xFFD01B98).withOpacity(0.6)
+                        : Colors.black.withOpacity(0.4),
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(
+                      color: _showResult
+                          ? const Color(0xFFD01B98).withOpacity(0.5)
+                          : const Color(0xFF6A0DAD).withOpacity(0.4),
                     ),
                   ),
-                ],
-              ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        _showResult ? Icons.check_circle : Icons.view_in_ar,
+                        color: Colors.white,
+                        size: 14,
+                      ),
+                      const SizedBox(width: 6),
+                      Text(
+                        _showResult
+                            ? (currentLang == 'id' ? "Terdeteksi" : "Detected")
+                            : (currentLang == 'id' ? "Scanning..." : "Scanning..."),
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 11,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ],
+                  ),
+                );
+              }
             ),
           ],
         ),
@@ -695,28 +785,7 @@ class _ARScannerScreenState extends State<ARScannerScreen>
     );
   }
 
-  Widget _langBtn(String code, String label) {
-    bool isSelected = _selectedLang == code;
-    return GestureDetector(
-      onTap: () => setState(() => _selectedLang = code),
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 200),
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-        decoration: BoxDecoration(
-          color: isSelected ? const Color(0xFF6A0DAD) : Colors.transparent,
-          borderRadius: BorderRadius.circular(20),
-        ),
-        child: Text(
-          label,
-          style: TextStyle(
-            color: isSelected ? Colors.black : Colors.white,
-            fontSize: 10,
-            fontWeight: FontWeight.bold,
-          ),
-        ),
-      ),
-    );
-  }
+  // ===== End HUD =====
 }
 
 // ===== SCAN RING PAINTER (saat belum mendeteksi) =====
@@ -767,7 +836,7 @@ class _ScanRingPainter extends CustomPainter {
   }
 
   void _drawCorner(Canvas canvas, Offset center, double radius, double angle) {
-    final len = 12.0;
+    const len = 12.0;
     final paint = Paint()
       ..color = const Color(0xFF6A0DAD).withOpacity(0.4)
       ..strokeWidth = 2
