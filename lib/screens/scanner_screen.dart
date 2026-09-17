@@ -7,7 +7,6 @@ import 'package:google_mlkit_image_labeling/google_mlkit_image_labeling.dart';
 import 'package:google_mlkit_text_recognition/google_mlkit_text_recognition.dart';
 import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter/services.dart';
-import 'package:animate_do/animate_do.dart';
 import 'package:permission_handler/permission_handler.dart';
 import '../globals.dart';
 import '../models/hero_model.dart';
@@ -31,6 +30,12 @@ class _ARScannerScreenState extends State<ARScannerScreen>
   // Draggable panel position
   Offset _panelOffset = Offset.zero;
   bool _panelPositionInitialized = false;
+
+  /// Ukuran panel yang benar-benar terukur setelah layout. Dipakai untuk
+  /// menghitung titik sambung garis penghubung ke reticle; tanpa ini garisnya
+  /// harus menebak tinggi panel yang berubah-ubah mengikuti panjang deskripsi.
+  final GlobalKey _panelKey = GlobalKey();
+  Size? _panelSize;
 
   // Audio player
   final AudioPlayer _audioPlayer = AudioPlayer();
@@ -173,14 +178,12 @@ class _ARScannerScreenState extends State<ARScannerScreen>
     return InputImage.fromBytes(bytes: bytes, metadata: metadata);
   }
 
-  String _debugLabel = '';
-
   void _processCameraImage(CameraImage image) async {
     if (_isBusy || !mounted) return;
 
     final now = DateTime.now();
     if (_lastProcessedTime != null &&
-        now.difference(_lastProcessedTime!).inMilliseconds < 500) {
+        now.difference(_lastProcessedTime!).inMilliseconds < 250) {
       return;
     }
 
@@ -195,21 +198,15 @@ class _ARScannerScreenState extends State<ARScannerScreen>
       }
 
       HeroModel? hero;
-      String currentDebug = '';
 
-      // 1. Coba OCR dulu
-      final recognizedText = await _textRecognizer.processImage(inputImage);
-      hero = _matchCoinByText(recognizedText.text);
-
-      // 2. Jika OCR gagal, coba Image Labeling (untuk koin bergambar)
-      if (hero == null && _imageLabelerReady && _imageLabeler != null) {
+      // 1. Image labeling dulu. Objek seperti barong/rangda tidak punya teks,
+      //    jadi menjalankan OCR lebih awal hanya menambah ratusan milidetik
+      //    per frame untuk hasil yang sudah pasti kosong.
+      if (_imageLabelerReady && _imageLabeler != null) {
         try {
           final labels = await _imageLabeler!.processImage(inputImage);
-          if (labels.isNotEmpty) {
-            // Simpan label tertinggi untuk debug UI
-            labels.sort((a, b) => b.confidence.compareTo(a.confidence));
-            currentDebug = '${labels.first.label} (${(labels.first.confidence * 100).toStringAsFixed(0)}%)';
-          }
+          // Urutkan supaya kandidat paling yakin diperiksa lebih dulu.
+          labels.sort((a, b) => b.confidence.compareTo(a.confidence));
           hero = _matchCoinByImage(labels);
         } catch (e) {
           debugPrint('⚠️ Image labeling error (skipped): $e');
@@ -217,11 +214,14 @@ class _ARScannerScreenState extends State<ARScannerScreen>
         }
       }
 
-      if (mounted) {
-        if (currentDebug.isNotEmpty && _debugLabel != currentDebug) {
-          setState(() => _debugLabel = currentDebug);
-        }
+      // 2. Kalau gambarnya tidak dikenali, baru OCR untuk koin yang
+      //    mengandalkan teks nominal / nama pahlawan.
+      if (hero == null) {
+        final recognizedText = await _textRecognizer.processImage(inputImage);
+        hero = _matchCoinByText(recognizedText.text);
+      }
 
+      if (mounted) {
         if (hero != null) {
           _missingFrames = 0;
           if (_scannedHero == null || _scannedHero!.name['id'] != hero.name['id']) {
@@ -265,40 +265,29 @@ class _ARScannerScreenState extends State<ARScannerScreen>
     return bestMatch;
   }
 
+  /// Ambang minimum confidence agar sebuah label dianggap sah.
+  /// Model 3 kelas membagi confidence jauh lebih merata daripada model 2 kelas,
+  /// sehingga 0.85 terlalu ketat dan membuat deteksi terasa lambat.
+  static const double _kMinLabelConfidence = 0.70;
+
   /// Mencocokkan koin berdasarkan gambar (image labeling / classification)
   HeroModel? _matchCoinByImage(List<ImageLabel> labels) {
-    if (labels.isEmpty) {
-      debugPrint('🔍 No labels detected by Image Labeler');
-    }
-    
     for (final label in labels) {
-      debugPrint('🔍 Label: "${label.label}" confidence=${label.confidence}');
       final labelText = label.label.trim().toLowerCase();
-      
-      // Threshold dinaikkan ke 0.85 (85%) untuk menghindari "salah deteksi"
-      // Jika koin lain terdeteksi sebagai Semar, berarti confidence modelnya kurang dari 85%, atau model salah mengenali.
-      if (label.confidence >= 0.85) {
-        
-        // Cek jika label adalah 'background' atau 'class 2' (sering digunakan sbg background di TM)
-        if (labelText.contains('background') || labelText == '1' || labelText == 'class 2') {
-          continue; // Abaikan background
-        }
+      debugPrint('🔍 Label: "$labelText" confidence=${label.confidence}');
 
-        for (final hero in mockHeroes) {
-          if (hero.label.isEmpty) continue;
-          final heroLabel = hero.label.toLowerCase();
-          
-          // Skenario 1: Metadata benar
-          if (labelText.contains(heroLabel) || heroLabel.contains(labelText)) {
-            debugPrint('✅ Image match (Skenario 1): ${hero.getName('id')}');
-            return hero;
-          }
-          
-          // Skenario 2: Index TFLite (0) atau default class (class 1)
-          if ((labelText == '0' || labelText == 'class 1') && heroLabel == 'semar') {
-            debugPrint('✅ Image match (Skenario 2/Fallback): ${hero.getName('id')}');
-            return hero;
-          }
+      if (label.confidence < _kMinLabelConfidence) continue;
+      if (labelText == 'background') continue;
+
+      for (final hero in mockHeroes) {
+        if (hero.label.isEmpty) continue;
+
+        // Pencocokan HARUS persis. Sebelumnya dipakai substring, dan itu fatal
+        // begitu model mengeluarkan label berupa angka: "0" ikut cocok dengan
+        // "koin_1000" dan "2" dengan "koin_200".
+        if (hero.label.toLowerCase() == labelText) {
+          debugPrint('✅ Image match: ${hero.getName('id')}');
+          return hero;
         }
       }
     }
@@ -349,9 +338,11 @@ class _ARScannerScreenState extends State<ARScannerScreen>
       WidgetsBinding.instance.addPostFrameCallback((_) {
         final size = MediaQuery.of(context).size;
         setState(() {
+          // Ditaruh di bawah reticle, bukan di tengah layar. Sebelumnya panel
+          // muncul persis menimpa objek yang sedang dipindai.
           _panelOffset = Offset(
-            (size.width - 300) / 2, // Lebar panel ~300
-            (size.height - 200) / 2, // Tinggi panel ~200
+            (size.width - 280) / 2,
+            size.height / 2 + 110,
           );
           _panelPositionInitialized = true;
         });
@@ -369,8 +360,43 @@ class _ARScannerScreenState extends State<ARScannerScreen>
           else
             const Center(child: CircularProgressIndicator(color: Color(0xFF6A0DAD))),
 
+          // LAYER 1.5: Sapuan scanline, hanya saat masih mencari
+          if (!_showResult)
+            IgnorePointer(
+              child: RepaintBoundary(
+                child: AnimatedBuilder(
+                  animation: _rotateController,
+                  builder: (_, __) => CustomPaint(
+                    size: Size.infinite,
+                    painter: _ScanlinePainter(progress: _rotateController.value),
+                  ),
+                ),
+              ),
+            ),
+
           // LAYER 2: AR targeting ring (tengah)
           _buildARTargeting(),
+
+          // LAYER 2.5: Garis penghubung reticle -> panel. Inilah yang membuat
+          // panel terbaca sebagai label milik objek, bukan kartu yang melayang
+          // lepas di atas video.
+          if (_showResult && _scannedHero != null && _panelPositionInitialized)
+            IgnorePointer(
+              child: RepaintBoundary(
+                child: AnimatedBuilder(
+                  animation: Listenable.merge([_rotateController, _lockController]),
+                  builder: (_, __) => CustomPaint(
+                    size: Size.infinite,
+                    painter: _ARConnectorPainter(
+                      panelOffset: _panelOffset,
+                      panelSize: _panelSize ?? const Size(280, 200),
+                      phase: _rotateController.value,
+                      reveal: _lockController.value,
+                    ),
+                  ),
+                ),
+              ),
+            ),
 
           // LAYER 3: Draggable info panel
           if (_showResult && _scannedHero != null) _buildDraggablePanel(),
@@ -379,19 +405,6 @@ class _ARScannerScreenState extends State<ARScannerScreen>
           Column(
             children: [
               _buildHUD(),
-              if (!_showResult && _debugLabel.isNotEmpty)
-                Container(
-                  margin: const EdgeInsets.only(top: 8),
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                  decoration: BoxDecoration(
-                    color: Colors.black54,
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: Text(
-                    'AI sees: $_debugLabel',
-                    style: const TextStyle(color: Colors.white70, fontSize: 12),
-                  ),
-                ),
             ],
           ),
         ],
@@ -400,11 +413,41 @@ class _ARScannerScreenState extends State<ARScannerScreen>
   }
 
   Widget _buildCamera() {
-    if (_controller == null || !_controller!.value.isInitialized) {
+    final controller = _controller;
+    if (controller == null || !controller.value.isInitialized) {
       return const SizedBox();
     }
-    return SizedBox.expand(
-      child: CameraPreview(_controller!),
+
+    // Sebelumnya dipakai SizedBox.expand, yang memaksa preview meregang
+    // mengikuti rasio layar — itu penyebab gambarnya gepeng, karena rasio
+    // sensor (mis. 4:3) hampir tidak pernah sama dengan rasio layar.
+    // FittedBox.cover mempertahankan rasio asli dan memotong sisi yang lebih,
+    // persis seperti aplikasi kamera bawaan.
+    final screen = MediaQuery.of(context).size;
+    final isLandscape = screen.width > screen.height;
+
+    // aspectRatio dari controller selalu dalam orientasi sensor (landscape).
+    // Saat layar portrait, CameraPreview memutar gambarnya sehingga rasio yang
+    // terlihat menjadi kebalikannya.
+    final previewRatio = controller.value.aspectRatio;
+    final childHeight = isLandscape
+        ? screen.width / previewRatio
+        : screen.width * previewRatio;
+
+    return ClipRect(
+      child: OverflowBox(
+        maxWidth: double.infinity,
+        maxHeight: double.infinity,
+        alignment: Alignment.center,
+        child: FittedBox(
+          fit: BoxFit.cover,
+          child: SizedBox(
+            width: screen.width,
+            height: childHeight,
+            child: CameraPreview(controller),
+          ),
+        ),
+      ),
     );
   }
 
@@ -453,6 +496,14 @@ class _ARScannerScreenState extends State<ARScannerScreen>
   // ===== DRAGGABLE INFO PANEL =====
   Widget _buildDraggablePanel() {
     final hero = _scannedHero!;
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final measured = _panelKey.currentContext?.size;
+      if (measured != null && measured != _panelSize && mounted) {
+        setState(() => _panelSize = measured);
+      }
+    });
+
     return Positioned(
       left: _panelOffset.dx,
       top: _panelOffset.dy,
@@ -462,9 +513,38 @@ class _ARScannerScreenState extends State<ARScannerScreen>
             _panelOffset += details.delta;
           });
         },
-        child: FadeInUp(
-          duration: const Duration(milliseconds: 400),
+        child: AnimatedBuilder(
+          animation: _lockController,
+          builder: (context, child) {
+            // Panel tumbuh keluar dari reticle lalu mendarat di posisinya,
+            // dengan kemiringan perspektif yang meluruh sampai rata. Berhenti
+            // di 0 supaya teksnya tetap terbaca saat diam.
+            final t = Curves.easeOutCubic
+                .transform(_lockController.value.clamp(0.0, 1.0));
+            final screen = MediaQuery.of(context).size;
+            final panelCenter = _panelOffset +
+                Offset(140, (_panelSize?.height ?? 200) / 2);
+            final travel =
+                (Offset(screen.width / 2, screen.height / 2) - panelCenter) *
+                    (1 - t);
+
+            return Opacity(
+              opacity: t,
+              child: Transform.translate(
+                offset: travel,
+                child: Transform(
+                  alignment: Alignment.center,
+                  transform: Matrix4.identity()
+                    ..setEntry(3, 2, 0.0012)
+                    ..rotateX(0.22 * (1 - t))
+                    ..scale(0.75 + 0.25 * t),
+                  child: child,
+                ),
+              ),
+            );
+          },
           child: Container(
+            key: _panelKey,
             width: 280,
             padding: const EdgeInsets.all(14),
             decoration: BoxDecoration(
@@ -934,4 +1014,116 @@ class _LockedRingPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(covariant _LockedRingPainter old) => true;
+}
+
+// ===== GARIS PENGHUBUNG RETICLE -> PANEL =====
+// Menarik garis dari titik bidik ke tepi panel terdekat, sehingga panel
+// terbaca sebagai label yang menempel pada objek. Titik sambungnya dihitung
+// ulang setiap panel digeser, jadi hubungan itu tetap terasa saat di-drag.
+class _ARConnectorPainter extends CustomPainter {
+  final Offset panelOffset;
+  final Size panelSize;
+  final double phase;
+  final double reveal;
+
+  _ARConnectorPainter({
+    required this.panelOffset,
+    required this.panelSize,
+    required this.phase,
+    required this.reveal,
+  });
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final target = Offset(size.width / 2, size.height / 2);
+    final rect = panelOffset & panelSize;
+
+    // Titik pada tepi panel yang paling dekat ke reticle.
+    final anchor = Offset(
+      target.dx.clamp(rect.left, rect.right),
+      target.dy.clamp(rect.top, rect.bottom),
+    );
+
+    final t = Curves.easeOut.transform(reveal.clamp(0.0, 1.0));
+    if (t <= 0.01) return;
+    final end = Offset.lerp(target, anchor, t)!;
+    if ((end - target).distance < 4) return;
+
+    canvas.drawLine(
+      target,
+      end,
+      Paint()
+        ..shader = const LinearGradient(
+          colors: [Color(0x00D01B98), Color(0xCCD01B98)],
+        ).createShader(Rect.fromPoints(target, end))
+        ..strokeWidth = 1.6
+        ..strokeCap = StrokeCap.round,
+    );
+
+    // Titik cahaya yang merayap sepanjang garis, memberi kesan data mengalir.
+    final travel = Offset.lerp(target, end, (phase * 2) % 1.0)!;
+    canvas.drawCircle(
+      travel,
+      2.5,
+      Paint()..color = const Color(0xFFD01B98).withOpacity(0.9),
+    );
+
+    // Simpul di tepi panel.
+    canvas.drawCircle(
+      end,
+      4,
+      Paint()
+        ..color = const Color(0xFFD01B98).withOpacity(0.85)
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 1.5,
+    );
+  }
+
+  @override
+  bool shouldRepaint(covariant _ARConnectorPainter old) =>
+      old.panelOffset != panelOffset ||
+      old.panelSize != panelSize ||
+      old.phase != phase ||
+      old.reveal != reveal;
+}
+
+// ===== SAPUAN SCANLINE =====
+// Pita tipis yang turun perlahan selama aplikasi masih mencari. Opasitasnya
+// sengaja rendah supaya tidak mengganggu saat dipakai lama.
+class _ScanlinePainter extends CustomPainter {
+  final double progress;
+  _ScanlinePainter({required this.progress});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    const bandHeight = 160.0;
+    final y = (progress * (size.height + bandHeight)) - bandHeight;
+    final band = Rect.fromLTWH(0, y, size.width, bandHeight);
+
+    canvas.drawRect(
+      band,
+      Paint()
+        ..shader = LinearGradient(
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+          colors: [
+            const Color(0xFF6A0DAD).withOpacity(0.0),
+            const Color(0xFF6A0DAD).withOpacity(0.10),
+            const Color(0xFFD01B98).withOpacity(0.16),
+          ],
+        ).createShader(band),
+    );
+
+    canvas.drawLine(
+      Offset(0, y + bandHeight),
+      Offset(size.width, y + bandHeight),
+      Paint()
+        ..color = const Color(0xFFD01B98).withOpacity(0.35)
+        ..strokeWidth = 1,
+    );
+  }
+
+  @override
+  bool shouldRepaint(covariant _ScanlinePainter old) =>
+      old.progress != progress;
 }

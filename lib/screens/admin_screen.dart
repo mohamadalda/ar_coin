@@ -153,9 +153,9 @@ class _AdminScreenState extends State<AdminScreen> {
                         ),
                         ElevatedButton.icon(
                           onPressed: () async {
-                            final result = await FilePicker.platform.pickFiles(type: FileType.image);
-                            if (result != null && result.files.single.path != null) {
-                              final path = await FileHelper.saveFileLocally(File(result.files.single.path!), 'img');
+                            final result = await FilePicker.pickFile(type: FileType.image);
+                            if (result?.path != null) {
+                              final path = await FileHelper.saveFileLocally(File(result!.path!), 'img');
                               if (path != null) {
                                 // Delete old local file if replaced
                                 if (currentImage.isNotEmpty && currentImage != (hero?.image ?? '')) {
@@ -170,7 +170,22 @@ class _AdminScreenState extends State<AdminScreen> {
                           icon: const Icon(Icons.image),
                           label: const Text('Upload'),
                           style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF6A0DAD)),
-                        )
+                        ),
+                        if (currentImage.isNotEmpty)
+                          IconButton(
+                            tooltip: 'Hapus gambar',
+                            icon: const Icon(Icons.delete_outline,
+                                color: Colors.redAccent),
+                            onPressed: () {
+                              // File yang baru diunggah dan belum disimpan langsung
+                              // dibuang di sini. File milik hero lama tidak disentuh —
+                              // pembersihannya sudah ditangani saat tombol Simpan.
+                              if (currentImage != (hero?.image ?? '')) {
+                                FileHelper.deleteLocalFile(currentImage);
+                              }
+                              setModalState(() => currentImage = '');
+                            },
+                          ),
                       ],
                     ),
                     const SizedBox(height: 10),
@@ -187,9 +202,9 @@ class _AdminScreenState extends State<AdminScreen> {
                         ),
                         ElevatedButton.icon(
                           onPressed: () async {
-                            final result = await FilePicker.platform.pickFiles(type: FileType.audio);
-                            if (result != null && result.files.single.path != null) {
-                              final path = await FileHelper.saveFileLocally(File(result.files.single.path!), 'aud');
+                            final result = await FilePicker.pickFile(type: FileType.audio);
+                            if (result?.path != null) {
+                              final path = await FileHelper.saveFileLocally(File(result!.path!), 'aud');
                               if (path != null) {
                                 // Delete old local file if replaced
                                 if (currentAudio.isNotEmpty && currentAudio != (hero?.audio ?? '')) {
@@ -204,7 +219,22 @@ class _AdminScreenState extends State<AdminScreen> {
                           icon: const Icon(Icons.audiotrack),
                           label: const Text('Upload'),
                           style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFD01B98)),
-                        )
+                        ),
+                        if (currentAudio.isNotEmpty)
+                          IconButton(
+                            tooltip: 'Hapus audio',
+                            icon: const Icon(Icons.delete_outline,
+                                color: Colors.redAccent),
+                            onPressed: () {
+                              // File yang baru diunggah dan belum disimpan langsung
+                              // dibuang di sini. File milik hero lama tidak disentuh —
+                              // pembersihannya sudah ditangani saat tombol Simpan.
+                              if (currentAudio != (hero?.audio ?? '')) {
+                                FileHelper.deleteLocalFile(currentAudio);
+                              }
+                              setModalState(() => currentAudio = '');
+                            },
+                          ),
                       ],
                     ),
 

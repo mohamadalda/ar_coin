@@ -58,5 +58,29 @@
     },
     "keywords": ["TEMAN", "PUNAKAWAN", "SERIES"],
     "label": "semar"
+  },
+  {
+    "name": {"id": "Barong", "en": "Barong"},
+    "coin": {"id": "Mitologi Bali", "en": "Balinese Mythology"},
+    "image": "",
+    "audio": "",
+    "description": {
+      "id": "Raja roh baik dalam mitologi Bali yang digambarkan menyerupai singa. Dipercaya dihidupkan oleh Banaspatiraja dan bertugas melindungi desa dari kekuatan jahat.",
+      "en": "King of the good spirits in Balinese mythology, depicted as a lion-like creature. Believed to be animated by Banaspatiraja and to protect villages from evil forces."
+    },
+    "keywords": [],
+    "label": "barong"
+  },
+  {
+    "name": {"id": "Rangda", "en": "Rangda"},
+    "coin": {"id": "Mitologi Bali", "en": "Balinese Mythology"},
+    "image": "",
+    "audio": "",
+    "description": {
+      "id": "Ratu iblis pemimpin para leak dan musuh abadi Barong. Dipercaya sebagai penjelmaan penyihir Calon Arang, digambarkan berambut panjang kusut dengan taring dan lidah menjulur.",
+      "en": "Demon queen who leads the leak and is Barong's eternal adversary. Believed to be the incarnation of the sorceress Calon Arang, depicted with long matted hair, fangs and a protruding tongue."
+    },
+    "keywords": [],
+    "label": "rangda"
   }
 ]
