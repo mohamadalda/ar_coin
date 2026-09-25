@@ -64,6 +64,8 @@
     "coin": {"id": "Mitologi Bali", "en": "Balinese Mythology"},
     "image": "",
     "audio": "",
+    "model": "assets/models/barong.glb",
+    "displayMode": "both",
     "description": {
       "id": "Raja roh baik dalam mitologi Bali yang digambarkan menyerupai singa. Dipercaya dihidupkan oleh Banaspatiraja dan bertugas melindungi desa dari kekuatan jahat.",
       "en": "King of the good spirits in Balinese mythology, depicted as a lion-like creature. Believed to be animated by Banaspatiraja and to protect villages from evil forces."

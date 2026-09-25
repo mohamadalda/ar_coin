@@ -41,7 +41,33 @@ class _AdminScreenState extends State<AdminScreen> {
                 onBackgroundImageError: (_, __) {},
                 child: const Icon(Icons.person, color: Colors.white24),
               ),
-              title: Text(hero.getName('id'), style: const TextStyle(color: Colors.white)),
+              title: Row(
+                children: [
+                  Flexible(
+                    child: Text(hero.getName('id'),
+                        style: const TextStyle(color: Colors.white),
+                        overflow: TextOverflow.ellipsis),
+                  ),
+                  // Penanda model 3D. Sengaja hanya tampilan, bukan kolom yang
+                  // bisa diedit: sumber model 3D adalah assets/heroes.json.
+                  if (hero.model.isNotEmpty) ...[
+                    const SizedBox(width: 8),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 6, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF6A0DAD).withValues(alpha: 0.35),
+                        borderRadius: BorderRadius.circular(6),
+                      ),
+                      child: const Text('3D',
+                          style: TextStyle(
+                              color: Colors.white70,
+                              fontSize: 10,
+                              fontWeight: FontWeight.bold)),
+                    ),
+                  ],
+                ],
+              ),
               subtitle: Text(hero.getCoin('id'), style: const TextStyle(color: Colors.white70)),
               trailing: Row(
                 mainAxisSize: MainAxisSize.min,
@@ -109,6 +135,8 @@ class _AdminScreenState extends State<AdminScreen> {
 
     String currentImage = hero?.image ?? '';
     String currentAudio = hero?.audio ?? '';
+    final String currentModel = hero?.model ?? '';
+    String currentDisplayMode = hero?.displayMode ?? HeroModel.displayPanel;
 
     showModalBottomSheet(
       context: context,
@@ -139,6 +167,36 @@ class _AdminScreenState extends State<AdminScreen> {
                     _buildTextField(descIdCtrl, 'Deskripsi Pahlawan', maxLines: 3),
                     _buildTextField(keywordsCtrl, 'Keywords (pisahkan dengan koma)'),
                     _buildTextField(labelCtrl, 'Label Model'),
+
+                    // Pilihan tampilan saat hero terdeteksi. Hanya muncul bila
+                    // hero punya model 3D — tanpa model, memilih '3D' cuma
+                    // menghasilkan layar kosong.
+                    if (currentModel.isNotEmpty) ...[
+                      const Text('Tampilan saat terdeteksi',
+                          style: TextStyle(color: Colors.white54, fontSize: 12)),
+                      const SizedBox(height: 8),
+                      Row(
+                        children: [
+                          _buildModeChip(
+                            label: 'Keterangan saja',
+                            icon: Icons.article_outlined,
+                            selected:
+                                currentDisplayMode == HeroModel.displayPanel,
+                            onTap: () => setModalState(() =>
+                                currentDisplayMode = HeroModel.displayPanel),
+                          ),
+                          const SizedBox(width: 8),
+                          _buildModeChip(
+                            label: '3D + keterangan',
+                            icon: Icons.view_in_ar,
+                            selected:
+                                currentDisplayMode == HeroModel.displayBoth,
+                            onTap: () => setModalState(() =>
+                                currentDisplayMode = HeroModel.displayBoth),
+                          ),
+                        ],
+                      ),
+                    ],
                     const SizedBox(height: 10),
                     
                     // Upload Image
@@ -247,7 +305,7 @@ class _AdminScreenState extends State<AdminScreen> {
                         ),
                         onPressed: () {
                           // Clean up if replaced original files (and they were local)
-                          if (isEditing && hero != null) {
+                          if (isEditing) {
                             if (currentImage != hero.image) {
                               FileHelper.deleteLocalFile(hero.image);
                             }
@@ -262,6 +320,10 @@ class _AdminScreenState extends State<AdminScreen> {
                             coin: {'id': coinIdCtrl.text},
                             image: currentImage,
                             audio: currentAudio,
+                            // Model 3D belum bisa diunggah lewat form ini;
+                            // diteruskan apa adanya supaya tidak hilang saat diedit.
+                            model: currentModel,
+                            displayMode: currentDisplayMode,
                             description: {'id': descIdCtrl.text},
                             keywords: keywordsCtrl.text.split(',').map((e) => e.trim().toUpperCase()).where((e) => e.isNotEmpty).toList(),
                             label: labelCtrl.text,
@@ -289,6 +351,47 @@ class _AdminScreenState extends State<AdminScreen> {
           }
         );
       },
+    );
+  }
+
+  Widget _buildModeChip({
+    required String label,
+    required IconData icon,
+    required bool selected,
+    required VoidCallback onTap,
+  }) {
+    return Expanded(
+      child: GestureDetector(
+        onTap: onTap,
+        child: Container(
+          padding: const EdgeInsets.symmetric(vertical: 10),
+          decoration: BoxDecoration(
+            color: selected
+                ? const Color(0xFF6A0DAD).withValues(alpha: 0.55)
+                : Colors.white.withValues(alpha: 0.06),
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(
+              color: selected ? const Color(0xFFD01B98) : Colors.white24,
+            ),
+          ),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(icon,
+                  size: 16,
+                  color: selected ? Colors.white : Colors.white54),
+              const SizedBox(width: 6),
+              Flexible(
+                child: Text(label,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                        fontSize: 12,
+                        color: selected ? Colors.white : Colors.white54)),
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 

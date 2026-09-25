@@ -83,7 +83,7 @@ class _LoginScreenState extends State<LoginScreen> {
               height: 300,
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
-                color: const Color(0xFF6A0DAD).withOpacity(0.15),
+                color: const Color(0xFF6A0DAD).withValues(alpha: 0.15),
               ),
             ),
           ),
@@ -95,7 +95,7 @@ class _LoginScreenState extends State<LoginScreen> {
               height: 250,
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
-                color: const Color(0xFFD01B98).withOpacity(0.15),
+                color: const Color(0xFFD01B98).withValues(alpha: 0.15),
               ),
             ),
           ),
@@ -114,16 +114,16 @@ class _LoginScreenState extends State<LoginScreen> {
                   border: 1.5,
                   linearGradient: LinearGradient(
                     colors: [
-                      Colors.white.withOpacity(0.1),
-                      Colors.white.withOpacity(0.05),
+                      Colors.white.withValues(alpha: 0.1),
+                      Colors.white.withValues(alpha: 0.05),
                     ],
                     begin: Alignment.topLeft,
                     end: Alignment.bottomRight,
                   ),
                   borderGradient: LinearGradient(
                     colors: [
-                      const Color(0xFFD01B98).withOpacity(0.5),
-                      const Color(0xFF6A0DAD).withOpacity(0.5),
+                      const Color(0xFFD01B98).withValues(alpha: 0.5),
+                      const Color(0xFF6A0DAD).withValues(alpha: 0.5),
                     ],
                   ),
                   child: Padding(
@@ -155,10 +155,10 @@ class _LoginScreenState extends State<LoginScreen> {
                           style: const TextStyle(color: Colors.white),
                           decoration: InputDecoration(
                             hintText: "Username",
-                            hintStyle: TextStyle(color: Colors.white.withOpacity(0.5)),
+                            hintStyle: TextStyle(color: Colors.white.withValues(alpha: 0.5)),
                             prefixIcon: const Icon(Icons.person, color: Colors.white70),
                             filled: true,
-                            fillColor: Colors.black.withOpacity(0.3),
+                            fillColor: Colors.black.withValues(alpha: 0.3),
                             border: OutlineInputBorder(
                               borderRadius: BorderRadius.circular(12),
                               borderSide: BorderSide.none,
@@ -174,7 +174,7 @@ class _LoginScreenState extends State<LoginScreen> {
                           style: const TextStyle(color: Colors.white),
                           decoration: InputDecoration(
                             hintText: "Password",
-                            hintStyle: TextStyle(color: Colors.white.withOpacity(0.5)),
+                            hintStyle: TextStyle(color: Colors.white.withValues(alpha: 0.5)),
                             prefixIcon: const Icon(Icons.lock, color: Colors.white70),
                             suffixIcon: IconButton(
                               icon: Icon(
@@ -188,7 +188,7 @@ class _LoginScreenState extends State<LoginScreen> {
                               },
                             ),
                             filled: true,
-                            fillColor: Colors.black.withOpacity(0.3),
+                            fillColor: Colors.black.withValues(alpha: 0.3),
                             border: OutlineInputBorder(
                               borderRadius: BorderRadius.circular(12),
                               borderSide: BorderSide.none,

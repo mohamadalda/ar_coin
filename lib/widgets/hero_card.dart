@@ -23,16 +23,16 @@ class HeroCard extends StatelessWidget {
         begin: Alignment.topLeft,
         end: Alignment.bottomRight,
         colors: [
-          const Color(0xFFffffff).withOpacity(0.2),
-          const Color(0xFFFFFFFF).withOpacity(0.05),
+          const Color(0xFFffffff).withValues(alpha: 0.2),
+          const Color(0xFFFFFFFF).withValues(alpha: 0.05),
         ],
       ),
       borderGradient: LinearGradient(
         begin: Alignment.topLeft,
         end: Alignment.bottomRight,
         colors: [
-          const Color(0xFFffffff).withOpacity(0.6),
-          const Color((0xFFFFFFFF)).withOpacity(0.1),
+          const Color(0xFFffffff).withValues(alpha: 0.6),
+          const Color((0xFFFFFFFF)).withValues(alpha: 0.1),
         ],
       ),
       child: ValueListenableBuilder<String>(
@@ -45,7 +45,7 @@ class HeroCard extends StatelessWidget {
               Container(
                 padding: const EdgeInsets.symmetric(vertical: 8),
                 decoration: BoxDecoration(
-                  color: Colors.cyan.withOpacity(0.3),
+                  color: Colors.cyan.withValues(alpha: 0.3),
                   borderRadius: const BorderRadius.only(
                     topLeft: Radius.circular(24),
                     topRight: Radius.circular(24),
@@ -80,7 +80,7 @@ class HeroCard extends StatelessWidget {
                     color: Colors.blueGrey[900],
                     boxShadow: [
                       BoxShadow(
-                        color: Colors.cyan.withOpacity(0.5),
+                        color: Colors.cyan.withValues(alpha: 0.5),
                         blurRadius: 20,
                         spreadRadius: 2,
                       ),
@@ -127,7 +127,7 @@ class HeroCard extends StatelessWidget {
                         maxLines: 4,
                         overflow: TextOverflow.ellipsis,
                         style: TextStyle(
-                          color: Colors.white.withOpacity(0.85),
+                          color: Colors.white.withValues(alpha: 0.85),
                           fontSize: 12,
                           height: 1.4,
                         ),

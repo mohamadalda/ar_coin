@@ -24,7 +24,7 @@ class FileHelper {
         await uploadsDir.create(recursive: true);
       }
 
-      final fileName = '$prefix\_${DateTime.now().millisecondsSinceEpoch}_${p.basename(sourceFile.path)}';
+      final fileName = '${prefix}_${DateTime.now().millisecondsSinceEpoch}_${p.basename(sourceFile.path)}';
       final savedImage = await sourceFile.copy('${uploadsDir.path}/$fileName');
       return savedImage.path;
     } catch (e) {

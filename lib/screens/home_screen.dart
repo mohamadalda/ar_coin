@@ -25,9 +25,9 @@ class HomeScreen extends StatelessWidget {
               height: 300,
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
-                color: const Color(0xFF6A0DAD).withOpacity(0.2),
+                color: const Color(0xFF6A0DAD).withValues(alpha: 0.2),
                 boxShadow: [
-                  BoxShadow(color: const Color(0xFF6A0DAD).withOpacity(0.5), blurRadius: 100),
+                  BoxShadow(color: const Color(0xFF6A0DAD).withValues(alpha: 0.5), blurRadius: 100),
                 ],
               ),
             ),
@@ -40,9 +40,9 @@ class HomeScreen extends StatelessWidget {
               height: 250,
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
-                color: const Color(0xFFD01B98).withOpacity(0.2),
+                color: const Color(0xFFD01B98).withValues(alpha: 0.2),
                 boxShadow: [
-                  BoxShadow(color: const Color(0xFFD01B98).withOpacity(0.4), blurRadius: 80),
+                  BoxShadow(color: const Color(0xFFD01B98).withValues(alpha: 0.4), blurRadius: 80),
                 ],
               ),
             ),
@@ -61,7 +61,7 @@ class HomeScreen extends StatelessWidget {
                     return Container(
                       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
                       decoration: BoxDecoration(
-                        color: Colors.white.withOpacity(0.1),
+                        color: Colors.white.withValues(alpha: 0.1),
                         borderRadius: BorderRadius.circular(20),
                         border: Border.all(color: Colors.white24),
                       ),
@@ -110,9 +110,9 @@ class HomeScreen extends StatelessWidget {
                       child: Container(
                         padding: const EdgeInsets.all(10),
                         decoration: BoxDecoration(
-                          color: isLoggedIn ? Colors.red.withOpacity(0.2) : Colors.white.withOpacity(0.1),
+                          color: isLoggedIn ? Colors.red.withValues(alpha: 0.2) : Colors.white.withValues(alpha: 0.1),
                           shape: BoxShape.circle,
-                          border: Border.all(color: isLoggedIn ? Colors.red.withOpacity(0.5) : Colors.white24),
+                          border: Border.all(color: isLoggedIn ? Colors.red.withValues(alpha: 0.5) : Colors.white24),
                         ),
                         child: Icon(
                           isLoggedIn ? Icons.logout : Icons.person,
@@ -152,7 +152,7 @@ class HomeScreen extends StatelessWidget {
                       fontWeight: FontWeight.bold,
                       letterSpacing: 4,
                       color: Colors.white,
-                      shadows: [Shadow(color: const Color(0xFF6A0DAD).withOpacity(0.5), blurRadius: 15)],
+                      shadows: [Shadow(color: const Color(0xFF6A0DAD).withValues(alpha: 0.5), blurRadius: 15)],
                     ),
                   ),
                 ),
@@ -172,7 +172,7 @@ class HomeScreen extends StatelessWidget {
                           textAlign: TextAlign.center,
                           style: TextStyle(
                             fontSize: 16,
-                            color: Colors.white.withOpacity(0.7),
+                            color: Colors.white.withValues(alpha: 0.7),
                             height: 1.5,
                           ),
                         );
@@ -199,7 +199,7 @@ class HomeScreen extends StatelessWidget {
                         borderRadius: BorderRadius.circular(30),
                         boxShadow: [
                           BoxShadow(
-                            color: const Color(0xFF6A0DAD).withOpacity(0.4),
+                            color: const Color(0xFF6A0DAD).withValues(alpha: 0.4),
                             blurRadius: 20,
                             offset: const Offset(0, 10),
                           ),
@@ -243,7 +243,7 @@ class HomeScreen extends StatelessWidget {
                         child: Container(
                           padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
                           decoration: BoxDecoration(
-                            color: Colors.white.withOpacity(0.1),
+                            color: Colors.white.withValues(alpha: 0.1),
                             borderRadius: BorderRadius.circular(20),
                             border: Border.all(color: Colors.white24),
                           ),

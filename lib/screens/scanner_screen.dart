@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:camera/camera.dart';
 import 'package:google_mlkit_image_labeling/google_mlkit_image_labeling.dart';
+import 'package:model_viewer_plus/model_viewer_plus.dart';
 import 'package:google_mlkit_text_recognition/google_mlkit_text_recognition.dart';
 import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter/services.dart';
@@ -56,6 +57,10 @@ class _ARScannerScreenState extends State<ARScannerScreen>
   late AnimationController _pulseController;
   late AnimationController _rotateController;
   late AnimationController _lockController;
+  /// Mengatur urutan kemunculan konten setelah objek terkunci. Dipisah dari
+  /// _lockController (yang mengurus cincin bidik) karena durasinya jauh lebih
+  /// panjang: di mode 'both', panel sengaja ditahan sampai model 3D tampil.
+  late AnimationController _revealController;
   late Animation<double> _lockScale;
 
   @override
@@ -76,6 +81,11 @@ class _ARScannerScreenState extends State<ARScannerScreen>
 
     _lockController = AnimationController(
       duration: const Duration(milliseconds: 500),
+      vsync: this,
+    );
+
+    _revealController = AnimationController(
+      duration: const Duration(milliseconds: 1500),
       vsync: this,
     );
     _lockScale = Tween<double>(begin: 1.5, end: 1.0).animate(
@@ -181,6 +191,11 @@ class _ARScannerScreenState extends State<ARScannerScreen>
   void _processCameraImage(CameraImage image) async {
     if (_isBusy || !mounted) return;
 
+    // Panel hasil menetap sampai ditutup manual, jadi tidak ada gunanya terus
+    // menjalankan inferensi. Menghentikannya di sini membebaskan CPU untuk
+    // WebView yang merender model 3D. Preview kamera tetap hidup.
+    if (_showResult) return;
+
     final now = DateTime.now();
     if (_lastProcessedTime != null &&
         now.difference(_lastProcessedTime!).inMilliseconds < 250) {
@@ -230,6 +245,7 @@ class _ARScannerScreenState extends State<ARScannerScreen>
               _showResult = true;
             });
             _lockController.forward(from: 0);
+            _revealController.forward(from: 0);
             if (mounted) {
               debugPrint('✅ Image match (Skenario 1): ${hero.getName(LanguageManager.currentLanguage.value)}');
               _playHeroAudio(hero);
@@ -328,6 +344,7 @@ class _ARScannerScreenState extends State<ARScannerScreen>
     _pulseController.dispose();
     _rotateController.dispose();
     _lockController.dispose();
+    _revealController.dispose();
     super.dispose();
   }
 
@@ -348,6 +365,13 @@ class _ARScannerScreenState extends State<ARScannerScreen>
         });
       });
     }
+
+    // Satu hero menampilkan SATU hal saja: model 3D atau kartu keterangan.
+    final hero = _scannedHero;
+    final show3d = _showResult &&
+        hero != null &&
+        hero.effectiveDisplayMode == HeroModel.displayBoth;
+    final showPanel = _showResult && hero != null;
 
     return Scaffold(
       backgroundColor: Colors.black,
@@ -377,21 +401,52 @@ class _ARScannerScreenState extends State<ARScannerScreen>
           // LAYER 2: AR targeting ring (tengah)
           _buildARTargeting(),
 
+          // LAYER 2.2: Model 3D melayang tepat di titik bidik. Dirender oleh
+          // <model-viewer> di dalam WebView transparan, jadi tidak butuh
+          // ARCore dan tetap jalan di perangkat apa pun.
+          if (show3d)
+            Center(
+              child: SizedBox(
+                width: 300,
+                height: 300,
+                child: ModelViewer(
+                  key: ValueKey(_scannedHero!.model),
+                  // Path relatif tanpa skema. model_viewer_plus me-redirect
+                  // src apa pun yang absolute (termasuk 'asset:///...') ke
+                  // WebView, dan skema itu tidak dikenal browser sehingga
+                  // modelnya gagal dimuat. Tanpa skema, ia dibaca rootBundle.
+                  src: _scannedHero!.model,
+                  alt: _scannedHero!.getName(
+                      LanguageManager.currentLanguage.value),
+                  autoRotate: true,
+                  cameraControls: true,
+                  disableZoom: true,
+                  backgroundColor: Colors.transparent,
+                  // Tombol AR bawaan model-viewer. Ia mendeteksi sendiri
+                  // dukungan perangkat, jadi tombolnya otomatis tidak muncul
+                  // di perangkat tanpa ARCore/ARKit.
+                  ar: true,
+                  arModes: const ['scene-viewer', 'webxr', 'quick-look'],
+                ),
+              ),
+            ),
+
           // LAYER 2.5: Garis penghubung reticle -> panel. Inilah yang membuat
           // panel terbaca sebagai label milik objek, bukan kartu yang melayang
           // lepas di atas video.
-          if (_showResult && _scannedHero != null && _panelPositionInitialized)
+          if (showPanel && _panelPositionInitialized)
             IgnorePointer(
               child: RepaintBoundary(
                 child: AnimatedBuilder(
-                  animation: Listenable.merge([_rotateController, _lockController]),
+                  animation:
+                      Listenable.merge([_rotateController, _revealController]),
                   builder: (_, __) => CustomPaint(
                     size: Size.infinite,
                     painter: _ARConnectorPainter(
                       panelOffset: _panelOffset,
                       panelSize: _panelSize ?? const Size(280, 200),
                       phase: _rotateController.value,
-                      reveal: _lockController.value,
+                      reveal: _panelReveal,
                     ),
                   ),
                 ),
@@ -399,7 +454,8 @@ class _ARScannerScreenState extends State<ARScannerScreen>
             ),
 
           // LAYER 3: Draggable info panel
-          if (_showResult && _scannedHero != null) _buildDraggablePanel(),
+          if (showPanel) _buildDraggablePanel(),
+
 
           // LAYER 4: Top HUD
           Column(
@@ -493,6 +549,18 @@ class _ARScannerScreenState extends State<ARScannerScreen>
     );
   }
 
+  /// Progres kemunculan panel keterangan.
+  /// Di mode 'both' panel ditahan sampai paruh kedua, supaya model 3D sempat
+  /// tampil lebih dulu; di mode 'panel' ia langsung berjalan dari awal.
+  double get _panelReveal {
+    final staged =
+        _scannedHero?.effectiveDisplayMode == HeroModel.displayBoth;
+    const stagedInterval = Interval(0.6, 1.0, curve: Curves.easeOutCubic);
+    const instantInterval = Interval(0.0, 0.4, curve: Curves.easeOutCubic);
+    return (staged ? stagedInterval : instantInterval)
+        .transform(_revealController.value);
+  }
+
   // ===== DRAGGABLE INFO PANEL =====
   Widget _buildDraggablePanel() {
     final hero = _scannedHero!;
@@ -514,13 +582,13 @@ class _ARScannerScreenState extends State<ARScannerScreen>
           });
         },
         child: AnimatedBuilder(
-          animation: _lockController,
+          animation: _revealController,
           builder: (context, child) {
             // Panel tumbuh keluar dari reticle lalu mendarat di posisinya,
             // dengan kemiringan perspektif yang meluruh sampai rata. Berhenti
             // di 0 supaya teksnya tetap terbaca saat diam.
-            final t = Curves.easeOutCubic
-                .transform(_lockController.value.clamp(0.0, 1.0));
+            final t = _panelReveal;
+            if (t <= 0.0) return const SizedBox.shrink();
             final screen = MediaQuery.of(context).size;
             final panelCenter = _panelOffset +
                 Offset(140, (_panelSize?.height ?? 200) / 2);
@@ -548,15 +616,15 @@ class _ARScannerScreenState extends State<ARScannerScreen>
             width: 280,
             padding: const EdgeInsets.all(14),
             decoration: BoxDecoration(
-              color: const Color(0xFF0A0E27).withOpacity(0.92),
+              color: const Color(0xFF0A0E27).withValues(alpha: 0.92),
               borderRadius: BorderRadius.circular(24),
               border: Border.all(
-                color: const Color(0xFF6A0DAD).withOpacity(0.3),
+                color: const Color(0xFF6A0DAD).withValues(alpha: 0.3),
                 width: 1.5,
               ),
               boxShadow: [
                 BoxShadow(
-                  color: const Color(0xFF6A0DAD).withOpacity(0.15),
+                  color: const Color(0xFF6A0DAD).withValues(alpha: 0.15),
                   blurRadius: 30,
                   spreadRadius: 5,
                 ),
@@ -576,7 +644,7 @@ class _ARScannerScreenState extends State<ARScannerScreen>
                       height: 4,
                       margin: const EdgeInsets.only(bottom: 12),
                       decoration: BoxDecoration(
-                        color: const Color(0xFF6A0DAD).withOpacity(0.5),
+                        color: const Color(0xFF6A0DAD).withValues(alpha: 0.5),
                         borderRadius: BorderRadius.circular(2),
                       ),
                     ),
@@ -595,7 +663,7 @@ class _ARScannerScreenState extends State<ARScannerScreen>
                         padding: const EdgeInsets.all(4),
                         margin: const EdgeInsets.only(bottom: 12),
                         decoration: BoxDecoration(
-                          color: Colors.white.withOpacity(0.1),
+                          color: Colors.white.withValues(alpha: 0.1),
                           shape: BoxShape.circle,
                         ),
                         child: const Icon(Icons.close, color: Colors.white70, size: 16),
@@ -604,7 +672,10 @@ class _ARScannerScreenState extends State<ARScannerScreen>
                   ],
                 ),
 
-                // Foto pahlawan (KLIK untuk audio)
+                // Foto pahlawan (KLIK untuk audio). Disembunyikan di mode
+                // '3D + keterangan' karena model 3D sudah mengambil perannya
+                // sebagai visual utama; menampilkan keduanya cuma mengulang.
+                if (hero.effectiveDisplayMode != HeroModel.displayBoth) ...[
                 GestureDetector(
                   onTap: () => _playHeroAudio(hero),
                   child: Stack(
@@ -624,7 +695,7 @@ class _ARScannerScreenState extends State<ARScannerScreen>
                               color: (_isPlayingAudio
                                       ? Colors.greenAccent
                                       : const Color(0xFF6A0DAD))
-                                  .withOpacity(0.5),
+                                  .withValues(alpha: 0.5),
                               blurRadius: 20,
                               spreadRadius: 3,
                             ),
@@ -676,8 +747,37 @@ class _ARScannerScreenState extends State<ARScannerScreen>
                     ],
                   ),
                 ),
-
-                const SizedBox(height: 10),
+                  const SizedBox(height: 10),
+                ] else if (hero.audio.isNotEmpty) ...[
+                  // Foto itu juga merangkap tombol audio. Saat disembunyikan,
+                  // audionya perlu jalan masuk sendiri. Ikon saja, tanpa teks,
+                  // supaya tidak menambah string yang belum diterjemahkan.
+                  GestureDetector(
+                    onTap: () => _playHeroAudio(hero),
+                    child: Container(
+                      width: 40,
+                      height: 40,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        color: Colors.white.withValues(alpha: 0.06),
+                        border: Border.all(
+                          color: _isPlayingAudio
+                              ? Colors.greenAccent
+                              : const Color(0xFFD01B98),
+                          width: 1.5,
+                        ),
+                      ),
+                      child: Icon(
+                        _isPlayingAudio
+                            ? Icons.stop_rounded
+                            : Icons.volume_up_rounded,
+                        size: 18,
+                        color: Colors.white,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                ],
 
                 // Badge nominal
                 Container(
@@ -686,8 +786,8 @@ class _ARScannerScreenState extends State<ARScannerScreen>
                   decoration: BoxDecoration(
                     gradient: LinearGradient(
                       colors: [
-                        const Color(0xFF6A0DAD).withOpacity(0.3),
-                        const Color(0xFFD01B98).withOpacity(0.2),
+                        const Color(0xFF6A0DAD).withValues(alpha: 0.3),
+                        const Color(0xFFD01B98).withValues(alpha: 0.2),
                       ],
                     ),
                     borderRadius: BorderRadius.circular(8),
@@ -735,7 +835,7 @@ class _ARScannerScreenState extends State<ARScannerScreen>
                       maxLines: 3,
                       overflow: TextOverflow.ellipsis,
                       style: TextStyle(
-                        color: Colors.white.withOpacity(0.7),
+                        color: Colors.white.withValues(alpha: 0.7),
                         fontSize: 11,
                         height: 1.3,
                       ),
@@ -753,7 +853,7 @@ class _ARScannerScreenState extends State<ARScannerScreen>
                           ? '🔊 Ketuk gambar untuk mendengar'
                           : '🔊 Tap image to listen',
                       style: TextStyle(
-                        color: const Color(0xFFD01B98).withOpacity(0.6),
+                        color: const Color(0xFFD01B98).withValues(alpha: 0.6),
                         fontSize: 9,
                         fontStyle: FontStyle.italic,
                       ),
@@ -790,7 +890,7 @@ class _ARScannerScreenState extends State<ARScannerScreen>
                   height: 32,
                   padding: const EdgeInsets.symmetric(horizontal: 8),
                   decoration: BoxDecoration(
-                    color: Colors.black.withOpacity(0.4),
+                    color: Colors.black.withValues(alpha: 0.4),
                     borderRadius: BorderRadius.circular(20),
                     border: Border.all(color: Colors.white24),
                   ),
@@ -826,13 +926,13 @@ class _ARScannerScreenState extends State<ARScannerScreen>
                   padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                   decoration: BoxDecoration(
                     color: _showResult
-                        ? const Color(0xFFD01B98).withOpacity(0.6)
-                        : Colors.black.withOpacity(0.4),
+                        ? const Color(0xFFD01B98).withValues(alpha: 0.6)
+                        : Colors.black.withValues(alpha: 0.4),
                     borderRadius: BorderRadius.circular(16),
                     border: Border.all(
                       color: _showResult
-                          ? const Color(0xFFD01B98).withOpacity(0.5)
-                          : const Color(0xFF6A0DAD).withOpacity(0.4),
+                          ? const Color(0xFFD01B98).withValues(alpha: 0.5)
+                          : const Color(0xFF6A0DAD).withValues(alpha: 0.4),
                     ),
                   ),
                   child: Row(
@@ -883,7 +983,7 @@ class _ScanRingPainter extends CustomPainter {
       center,
       radius + 8,
       Paint()
-        ..color = const Color(0xFF6A0DAD).withOpacity(0.15)
+        ..color = const Color(0xFF6A0DAD).withValues(alpha: 0.15)
         ..style = PaintingStyle.stroke
         ..strokeWidth = 1,
     );
@@ -901,7 +1001,7 @@ class _ScanRingPainter extends CustomPainter {
 
     // Crosshair kecil di tengah
     final crossPaint = Paint()
-      ..color = const Color(0xFF6A0DAD).withOpacity(0.5)
+      ..color = const Color(0xFF6A0DAD).withValues(alpha: 0.5)
       ..strokeWidth = 1;
     canvas.drawLine(Offset(center.dx - 10, center.dy),
         Offset(center.dx + 10, center.dy), crossPaint);
@@ -918,7 +1018,7 @@ class _ScanRingPainter extends CustomPainter {
   void _drawCorner(Canvas canvas, Offset center, double radius, double angle) {
     const len = 12.0;
     final paint = Paint()
-      ..color = const Color(0xFF6A0DAD).withOpacity(0.4)
+      ..color = const Color(0xFF6A0DAD).withValues(alpha: 0.4)
       ..strokeWidth = 2
       ..strokeCap = StrokeCap.round;
 
@@ -958,7 +1058,7 @@ class _LockedRingPainter extends CustomPainter {
       center,
       radius - 5,
       Paint()
-        ..color = const Color(0xFFD01B98).withOpacity(0.08)
+        ..color = const Color(0xFFD01B98).withValues(alpha: 0.08)
         ..style = PaintingStyle.fill,
     );
 
@@ -967,7 +1067,7 @@ class _LockedRingPainter extends CustomPainter {
       center,
       radius,
       Paint()
-        ..color = const Color(0xFFD01B98).withOpacity(0.6)
+        ..color = const Color(0xFFD01B98).withValues(alpha: 0.6)
         ..style = PaintingStyle.stroke
         ..strokeWidth = 2.5,
     );
@@ -977,7 +1077,7 @@ class _LockedRingPainter extends CustomPainter {
       center,
       radius + 10,
       Paint()
-        ..color = const Color(0xFF6A0DAD).withOpacity(0.2)
+        ..color = const Color(0xFF6A0DAD).withValues(alpha: 0.2)
         ..style = PaintingStyle.stroke
         ..strokeWidth = 1,
     );
@@ -993,7 +1093,7 @@ class _LockedRingPainter extends CustomPainter {
 
     // Crosshair
     final crossPaint = Paint()
-      ..color = const Color(0xFFD01B98).withOpacity(0.6)
+      ..color = const Color(0xFFD01B98).withValues(alpha: 0.6)
       ..strokeWidth = 1;
     canvas.drawLine(Offset(center.dx - 15, center.dy),
         Offset(center.dx - 5, center.dy), crossPaint);
@@ -1065,7 +1165,7 @@ class _ARConnectorPainter extends CustomPainter {
     canvas.drawCircle(
       travel,
       2.5,
-      Paint()..color = const Color(0xFFD01B98).withOpacity(0.9),
+      Paint()..color = const Color(0xFFD01B98).withValues(alpha: 0.9),
     );
 
     // Simpul di tepi panel.
@@ -1073,7 +1173,7 @@ class _ARConnectorPainter extends CustomPainter {
       end,
       4,
       Paint()
-        ..color = const Color(0xFFD01B98).withOpacity(0.85)
+        ..color = const Color(0xFFD01B98).withValues(alpha: 0.85)
         ..style = PaintingStyle.stroke
         ..strokeWidth = 1.5,
     );
@@ -1107,9 +1207,9 @@ class _ScanlinePainter extends CustomPainter {
           begin: Alignment.topCenter,
           end: Alignment.bottomCenter,
           colors: [
-            const Color(0xFF6A0DAD).withOpacity(0.0),
-            const Color(0xFF6A0DAD).withOpacity(0.10),
-            const Color(0xFFD01B98).withOpacity(0.16),
+            const Color(0xFF6A0DAD).withValues(alpha: 0.0),
+            const Color(0xFF6A0DAD).withValues(alpha: 0.10),
+            const Color(0xFFD01B98).withValues(alpha: 0.16),
           ],
         ).createShader(band),
     );
@@ -1118,7 +1218,7 @@ class _ScanlinePainter extends CustomPainter {
       Offset(0, y + bandHeight),
       Offset(size.width, y + bandHeight),
       Paint()
-        ..color = const Color(0xFFD01B98).withOpacity(0.35)
+        ..color = const Color(0xFFD01B98).withValues(alpha: 0.35)
         ..strokeWidth = 1,
     );
   }

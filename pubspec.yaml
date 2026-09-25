@@ -47,6 +47,7 @@ dependencies:
   file_picker: ^12.2.0
   path_provider: ^2.1.2
   translator: ^1.0.4+1
+  model_viewer_plus: ^1.10.0
 
 dev_dependencies:
   flutter_test:
@@ -58,6 +59,7 @@ dev_dependencies:
   # package. See that file for information about deactivating specific lint
   # rules and activating additional ones.
   flutter_lints: ^2.0.0
+  flutter_launcher_icons: ^0.14.4
 
 # For information on the generic Dart part of this file, see the
 # following page: https://dart.dev/tools/pub/pubspec
@@ -74,6 +76,7 @@ flutter:
     - assets/
     - assets/images/
     - assets/audio/
+    - assets/models/
 
   # An image asset can refer to one or more resolution-specific "variants", see
   # https://flutter.dev/assets-and-images/#resolution-aware
@@ -100,3 +103,19 @@ flutter:
   #
   # For details regarding fonts from package dependencies,
   # see https://flutter.dev/custom-fonts/#from-packages
+
+# Konfigurasi ikon peluncur. Jalankan ulang setelah mengubah logo:
+#   dart run flutter_launcher_icons
+flutter_launcher_icons:
+  image_path: "assets/launcher/icon.png"
+
+  android: "ic_launcher"
+  # Android 8+ memangkas ikon mengikuti bentuk mask peluncur, jadi foreground-nya
+  # memakai versi ber-padding agar logonya tidak terpotong.
+  adaptive_icon_background: "#0F172A"
+  adaptive_icon_foreground: "assets/launcher/icon_foreground.png"
+
+  ios: true
+  # Ikon iOS tidak boleh punya kanal alpha; logonya diratakan ke warna latar tema.
+  remove_alpha_ios: true
+  background_color_ios: "#0F172A"
