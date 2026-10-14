@@ -48,6 +48,8 @@ dependencies:
   path_provider: ^2.1.2
   translator: ^1.0.4+1
   model_viewer_plus: ^1.10.0
+  google_mlkit_object_detection: ^0.13.1
+  webview_flutter: ^4.14.1
 
 dev_dependencies:
   flutter_test:

@@ -10,6 +10,11 @@ PODS:
     - google_mlkit_commons
     - GoogleMLKit/ImageLabeling (~> 6.0.0)
     - GoogleMLKit/ImageLabelingCustom (~> 6.0.0)
+  - google_mlkit_object_detection (0.13.1):
+    - Flutter
+    - google_mlkit_commons
+    - GoogleMLKit/ObjectDetection (~> 6.0.0)
+    - GoogleMLKit/ObjectDetectionCustom (~> 6.0.0)
   - google_mlkit_text_recognition (0.13.1):
     - Flutter
     - google_mlkit_commons
@@ -26,6 +31,12 @@ PODS:
     - MLKitImageLabelingCustom (~> 5.0.0)
   - GoogleMLKit/MLKitCore (6.0.0):
     - MLKitCommon (~> 11.0.0)
+  - GoogleMLKit/ObjectDetection (6.0.0):
+    - GoogleMLKit/MLKitCore
+    - MLKitObjectDetection (~> 5.0.0)
+  - GoogleMLKit/ObjectDetectionCustom (6.0.0):
+    - GoogleMLKit/MLKitCore
+    - MLKitObjectDetectionCustom (~> 5.0.0)
   - GoogleMLKit/TextRecognition (6.0.0):
     - GoogleMLKit/MLKitCore
     - MLKitTextRecognition (~> 4.0.0)
@@ -68,9 +79,19 @@ PODS:
     - MLKitImageLabelingCommon (~> 7.0)
     - MLKitVision (~> 7.0)
     - MLKitVisionKit (~> 8.0)
+  - MLKitObjectDetection (5.0.0):
+    - MLKitCommon (~> 11.0)
+    - MLKitObjectDetectionCommon (~> 7.0)
+    - MLKitVision (~> 7.0)
+    - MLKitVisionKit (~> 8.0)
   - MLKitObjectDetectionCommon (7.0.0):
     - MLKitCommon (~> 11.0)
     - MLKitVision (~> 7.0)
+  - MLKitObjectDetectionCustom (5.0.0):
+    - MLKitCommon (~> 11.0)
+    - MLKitObjectDetectionCommon (~> 7.0)
+    - MLKitVision (~> 7.0)
+    - MLKitVisionKit (~> 8.0)
   - MLKitTextRecognition (4.0.0):
     - MLKitCommon (~> 11.0)
     - MLKitTextRecognitionCommon (= 3.0.0)
@@ -101,6 +122,7 @@ DEPENDENCIES:
   - Flutter (from `Flutter`)
   - google_mlkit_commons (from `.symlinks/plugins/google_mlkit_commons/ios`)
   - google_mlkit_image_labeling (from `.symlinks/plugins/google_mlkit_image_labeling/ios`)
+  - google_mlkit_object_detection (from `.symlinks/plugins/google_mlkit_object_detection/ios`)
   - google_mlkit_text_recognition (from `.symlinks/plugins/google_mlkit_text_recognition/ios`)
 
 SPEC REPOS:
@@ -116,7 +138,9 @@ SPEC REPOS:
     - MLKitImageLabeling
     - MLKitImageLabelingCommon
     - MLKitImageLabelingCustom
+    - MLKitObjectDetection
     - MLKitObjectDetectionCommon
+    - MLKitObjectDetectionCustom
     - MLKitTextRecognition
     - MLKitTextRecognitionCommon
     - MLKitVision
@@ -133,6 +157,8 @@ EXTERNAL SOURCES:
     :path: ".symlinks/plugins/google_mlkit_commons/ios"
   google_mlkit_image_labeling:
     :path: ".symlinks/plugins/google_mlkit_image_labeling/ios"
+  google_mlkit_object_detection:
+    :path: ".symlinks/plugins/google_mlkit_object_detection/ios"
   google_mlkit_text_recognition:
     :path: ".symlinks/plugins/google_mlkit_text_recognition/ios"
 
@@ -141,6 +167,7 @@ SPEC CHECKSUMS:
   Flutter: cabc95a1d2626b1b06e7179b784ebcf0c0cde467
   google_mlkit_commons: 414fc36ac51758c806381de33a1d148d2ba71ce4
   google_mlkit_image_labeling: e2baee525b82b66711a6390f9ce0e8c94991c9eb
+  google_mlkit_object_detection: 888a9864123f5ef0e0a8c8d3f1d9f6c14393840d
   google_mlkit_text_recognition: 6dd0122107954e64667d826da71de686152109fe
   GoogleDataTransport: 6c09b596d841063d76d4288cc2d2f42cc36e1e2a
   GoogleMLKit: 97ac7af399057e99182ee8edfa8249e3226a4065
@@ -153,7 +180,9 @@ SPEC CHECKSUMS:
   MLKitImageLabeling: c13caec3baa684553ec823d5dfbca3e3be8ce9a2
   MLKitImageLabelingCommon: fa802f14c3a321121409f6cbe1df89ba9cf1a00c
   MLKitImageLabelingCustom: 57b8782ddda60b3027a796efcc0c6970f9e2b78f
+  MLKitObjectDetection: 9b40359730baceef23322c6d41070da7639ff100
   MLKitObjectDetectionCommon: f3ca8581a0741be6ce609920367316571a280efa
+  MLKitObjectDetectionCustom: a412a63a743724ae124b07d6c3cc817283da3453
   MLKitTextRecognition: c83c18ad25496f2077f6ec93c5940487ff2eb343
   MLKitTextRecognitionCommon: c0b3a63d529296a19bce1f8bc8a513644ed4d1f6
   MLKitVision: e858c5f125ecc288e4a31127928301eaba9ae0c1

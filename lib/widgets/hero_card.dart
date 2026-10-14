@@ -90,7 +90,7 @@ class HeroCard extends StatelessWidget {
                   child: ClipOval(
                     child: FileHelper.isLocalFile(hero.image)
                         ? Image.file(
-                            File(hero.image),
+                            File(FileHelper.resolve(hero.image)),
                             fit: BoxFit.cover,
                             errorBuilder: (context, error, stackTrace) => const Icon(Icons.person, size: 50, color: Colors.grey),
                           )

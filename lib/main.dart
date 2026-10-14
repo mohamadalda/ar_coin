@@ -6,6 +6,7 @@ import 'globals.dart';
 import 'screens/home_screen.dart';
 import 'models/hero_model.dart';
 import 'utils/auth_service.dart';
+import 'utils/file_helper.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -15,6 +16,10 @@ Future<void> main() async {
     debugPrint('Error: ${e.code}\nError Message: ${e.description}');
   }
   
+  // Harus sebelum loadHeroes(): path berkas unggahan disimpan relatif dan
+  // butuh folder dokumen aplikasi untuk bisa dibuka.
+  await FileHelper.init();
+
   // Load heroes data from JSON
   await loadHeroes();
 

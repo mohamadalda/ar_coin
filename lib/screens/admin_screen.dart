@@ -27,7 +27,7 @@ class _AdminScreenState extends State<AdminScreen> {
           
           ImageProvider imageProvider;
           if (FileHelper.isLocalFile(hero.image)) {
-            imageProvider = FileImage(File(hero.image));
+            imageProvider = FileImage(File(FileHelper.resolve(hero.image)));
           } else {
             imageProvider = AssetImage(hero.image);
           }
@@ -115,6 +115,7 @@ class _AdminScreenState extends State<AdminScreen> {
               saveHeroes();
               await FileHelper.deleteLocalFile(hero.image);
               await FileHelper.deleteLocalFile(hero.audio);
+              await FileHelper.deleteLocalFile(hero.model);
               if (mounted) Navigator.pop(ctx);
             },
             child: const Text('Hapus', style: TextStyle(color: Colors.redAccent)),
@@ -135,6 +136,9 @@ class _AdminScreenState extends State<AdminScreen> {
 
     String currentImage = hero?.image ?? '';
     String currentAudio = hero?.audio ?? '';
+    // Model 3D tidak diunggah lewat Admin — sumbernya assets/heroes.json.
+    // Di sini hanya diteruskan apa adanya supaya tidak hilang saat diedit,
+    // dan dipakai untuk menentukan apakah pilihan tampilan relevan.
     final String currentModel = hero?.model ?? '';
     String currentDisplayMode = hero?.displayMode ?? HeroModel.displayPanel;
 
@@ -320,8 +324,6 @@ class _AdminScreenState extends State<AdminScreen> {
                             coin: {'id': coinIdCtrl.text},
                             image: currentImage,
                             audio: currentAudio,
-                            // Model 3D belum bisa diunggah lewat form ini;
-                            // diteruskan apa adanya supaya tidak hilang saat diedit.
                             model: currentModel,
                             displayMode: currentDisplayMode,
                             description: {'id': descIdCtrl.text},

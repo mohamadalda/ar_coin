@@ -1,10 +1,12 @@
 import 'dart:async';
 import 'dart:math';
+import 'dart:math' as math;
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:camera/camera.dart';
-import 'package:google_mlkit_image_labeling/google_mlkit_image_labeling.dart';
+import 'package:google_mlkit_object_detection/google_mlkit_object_detection.dart';
 import 'package:model_viewer_plus/model_viewer_plus.dart';
+import 'package:webview_flutter/webview_flutter.dart';
 import 'package:google_mlkit_text_recognition/google_mlkit_text_recognition.dart';
 import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter/services.dart';
@@ -26,11 +28,21 @@ class _ARScannerScreenState extends State<ARScannerScreen>
   CameraController? _controller;
   bool _isCameraInitialized = false;
   bool _showResult = false;
+
+  /// Di mode '3D + keterangan', kartu keterangan tidak langsung muncul —
+  /// ia menutupi asetnya. Baru tampil setelah tombol info ditekan.
+  bool _panelExpanded = false;
+
+  /// Menjadi true setelah <model-viewer> selesai memuat dan merender model.
+  /// Tombol info menunggu ini supaya tidak muncul mendahului asetnya.
+  bool _modelReady = false;
   HeroModel? _scannedHero;
 
   // Draggable panel position
-  Offset _panelOffset = Offset.zero;
-  bool _panelPositionInitialized = false;
+  /// Geseran manual dari posisi dasarnya. Posisi dasar sendiri mengikuti koin,
+  /// jadi yang disimpan adalah selisihnya — bukan koordinat absolut seperti
+  /// dulu, yang membuat panel diam di tempat saat koin bergerak.
+  Offset _panelDragDelta = Offset.zero;
 
   /// Ukuran panel yang benar-benar terukur setelah layout. Dipakai untuk
   /// menghitung titik sambung garis penghubung ke reticle; tanpa ini garisnya
@@ -45,18 +57,118 @@ class _ARScannerScreenState extends State<ARScannerScreen>
   // OCR (text recognition)
   final TextRecognizer _textRecognizer = TextRecognizer();
 
-  // Image labeling (untuk koin bergambar seperti Semar)
-  ImageLabeler? _imageLabeler;
-  bool _imageLabelerReady = false;
+  // Object detection dengan model TFLite kustom. Dipakai menggantikan image
+  // labeling karena ia mengembalikan boundingBox selain label — tanpa itu
+  // posisi objek tidak diketahui dan aset 3D terpaku di tengah layar.
+  ObjectDetector? _objectDetector;
+  bool _objectDetectorReady = false;
+
+  /// Kotak objek terakhir, dalam koordinat gambar yang sudah tegak.
+  Rect? _trackedRect;
+
+  /// Ukuran gambar sumber setelah rotasi diterapkan. Dibutuhkan untuk
+  /// memetakan _trackedRect ke koordinat layar.
+  Size? _trackedSourceSize;
+
 
   bool _isBusy = false;
   int _missingFrames = 0;
+
+  /// Masa tenggang sebelum overlay dilepas, dibedakan menurut penyebabnya.
+  ///
+  /// Kalau detektor sama sekali tidak menemukan objek, koin memang sudah keluar
+  /// layar — lepas cepat. Kalau objeknya masih terlihat tapi label-nya meleset
+  /// ('background'), itu cuma model yang ragu sesaat: tahan lebih lama, kalau
+  /// tidak overlay akan berkedip-kedip. Pada throttle 250 ms, 2 frame ≈ 0,5 detik
+  /// dan 8 frame ≈ 2 detik.
+  /// Kendali sudut pandang model dikembalikan ke jari. Percobaan menggerakkannya
+  /// dari sensor perangkat dibatalkan: sudut naik-turun diambil dari gravitasi,
+  /// sedangkan memotret koin di meja berarti kamera menunduk — akibatnya model
+  /// selalu tampak dari atas alias "tiduran".
+  WebViewController? _modelWebView;
+
+  /// Ukuran kotak render model dan ukuran layar terakhir. Disimpan di luar
+  /// setState karena hanya dipakai saat mendorong ukuran ke WebView.
+  Size? _lastScreenSize;
+  double _modelSide = 300;
+
+  /// Tinggi model 3D di layar, sebagai kelipatan tinggi kotak koin.
+  /// Inilah yang membuat model ikut mengecil saat kamera dijauhkan dan
+  /// membesar saat didekatkan.
+  ///
+  /// 1.0 = setinggi koin. Naikkan kalau ingin modelnya lebih besar dari koin
+  /// (2.0 berarti dua kali tinggi koin).
+  static const double _kModelHeightVsCoin = 1.0;
+
+  /// Disuntikkan sekali ke halaman model-viewer. Menghitung sendiri faktor
+  /// piksel-per-meter dari dimensi model dan field-of-view yang BENAR-BENAR
+  /// dipakai saat render, lalu menyediakan setSize() untuk dipanggil dari Dart.
+  ///
+  /// setSize hanya menyentuh JARAK kamera dan mempertahankan sudut yang sedang
+  /// dipegang pengguna — kalau ia ikut menulis sudut, ia akan berebut dengan
+  /// jari yang sedang menggeser model.
+  static const String _kLockJs = """
+(function () {
+  var mv = document.querySelector('model-viewer');
+  if (!mv) return;
+  var K = 0, pending = 0, t0 = performance.now();
+  function calibrate() {
+    try {
+      var d = mv.getDimensions();
+      var fov = mv.getFieldOfView() * Math.PI / 180;
+      // radius_meter = K / tinggi_piksel_yang_diinginkan
+      K = d.y * mv.clientHeight / (2 * Math.tan(fov / 2));
+    } catch (e) { K = 0; }
+  }
+  function apply(px) {
+    if (!K || !px) return;
+    var o = mv.getCameraOrbit();
+    var want = K / px;
+    // Hanya tulis kalau ukurannya memang perlu berubah. Tanpa ambang ini,
+    // tiap pembaruan menimpa sudut yang sedang digeser jari.
+    if (!o.radius || Math.abs(want - o.radius) / o.radius < 0.02) return;
+    mv.cameraOrbit = (o.theta * 180 / Math.PI).toFixed(1) + 'deg ' +
+                     (o.phi * 180 / Math.PI).toFixed(1) + 'deg ' +
+                     want.toFixed(2) + 'm';
+  }
+  mv.addEventListener('load', function () {
+    calibrate();
+    // Beri tahu Dart bahwa model sudah benar-benar siap tampil.
+    try {
+      if (window.ModelReady) {
+        window.ModelReady.postMessage(String(Math.round(performance.now() - t0)));
+      }
+    } catch (e) {}
+    // Permintaan ukuran yang tiba sebelum model selesai dimuat tidak boleh
+    // hilang begitu saja — kalau hilang, model tampil di ukuran bawaan sampai
+    // koin kebetulan bergerak lagi.
+    if (pending) apply(pending);
+  });
+  window.addEventListener('resize', function () {
+    calibrate();
+    if (pending) apply(pending);
+  });
+  window.setSize = function (px) {
+    pending = px;
+    apply(px);
+  };
+})();
+""";
+
+  /// Jarak vertikal antara tepi bawah aset 3D dan tepi atas kartu keterangan,
+  /// dalam piksel logis. Perbesar kalau kartunya masih terasa menutupi aset,
+  /// perkecil kalau terlalu jauh terpisah.
+  static const double _kPanelGapFromModel = 10.0;
+
+  static const int _kFramesBeforeDropNoObject = 2;
+  static const int _kFramesBeforeDropUnmatched = 8;
   DateTime? _lastProcessedTime;
 
   // Animasi
   late AnimationController _pulseController;
   late AnimationController _rotateController;
   late AnimationController _lockController;
+
   /// Mengatur urutan kemunculan konten setelah objek terkunci. Dipisah dari
   /// _lockController (yang mengurus cincin bidik) karena durasinya jauh lebih
   /// panjang: di mode 'both', panel sengaja ditahan sampai model 3D tampil.
@@ -67,7 +179,7 @@ class _ARScannerScreenState extends State<ARScannerScreen>
   void initState() {
     super.initState();
     _requestPermissionAndInitCamera();
-    _initImageLabeler();
+    _initObjectDetector();
 
     _pulseController = AnimationController(
       duration: const Duration(milliseconds: 1500),
@@ -105,20 +217,23 @@ class _ARScannerScreenState extends State<ARScannerScreen>
     return file.path;
   }
 
-  /// Inisialisasi image labeler dengan custom TFLite model
-  Future<void> _initImageLabeler() async {
+  /// Inisialisasi object detector dengan custom TFLite model
+  Future<void> _initObjectDetector() async {
     try {
       final modelPath = await _getModelPath('coin_model.tflite');
-      final options = LocalLabelerOptions(
+      final options = LocalObjectDetectorOptions(
+        mode: DetectionMode.stream,
         modelPath: modelPath,
+        classifyObjects: true,
+        multipleObjects: false,
         confidenceThreshold: 0.5,
       );
-      _imageLabeler = ImageLabeler(options: options);
-      _imageLabelerReady = true;
-      debugPrint('✅ Image labeler initialized');
+      _objectDetector = ObjectDetector(options: options);
+      _objectDetectorReady = true;
+      debugPrint('✅ Object detector initialized');
     } catch (e) {
-      debugPrint('❌ Image labeler init error (OCR only mode): $e');
-      _imageLabelerReady = false;
+      debugPrint('❌ Object detector init error (OCR only mode): $e');
+      _objectDetectorReady = false;
     }
   }
 
@@ -170,13 +285,26 @@ class _ARScannerScreenState extends State<ARScannerScreen>
     final format = InputImageFormatValue.fromRawValue(image.format.raw);
     if (format == null) return null;
 
-    final totalBytes = image.planes.fold(0, (sum, plane) => sum + plane.bytes.length);
+    final totalBytes =
+        image.planes.fold(0, (sum, plane) => sum + plane.bytes.length);
     final bytes = Uint8List(totalBytes);
     int offset = 0;
     for (final plane in image.planes) {
       bytes.setRange(offset, offset + plane.bytes.length, plane.bytes);
       offset += plane.bytes.length;
     }
+
+    // Konvensi koordinat kotak ML Kit BERBEDA antar platform. Di Android,
+    // rotasi 90/270 membuat sumbu tertukar sehingga lebar/tinggi harus dibalik.
+    // Di iOS tidak — ini mengikuti coordinates_translator.dart pada contoh
+    // resmi google_mlkit, yang juga hanya membalik untuk Android.
+    final swapAxes = !Platform.isIOS &&
+        (rotation == InputImageRotation.rotation90deg ||
+            rotation == InputImageRotation.rotation270deg);
+    final source = swapAxes
+        ? Size(image.height.toDouble(), image.width.toDouble())
+        : Size(image.width.toDouble(), image.height.toDouble());
+    if (_trackedSourceSize != source) _trackedSourceSize = source;
 
     final metadata = InputImageMetadata(
       size: Size(image.width.toDouble(), image.height.toDouble()),
@@ -191,14 +319,13 @@ class _ARScannerScreenState extends State<ARScannerScreen>
   void _processCameraImage(CameraImage image) async {
     if (_isBusy || !mounted) return;
 
-    // Panel hasil menetap sampai ditutup manual, jadi tidak ada gunanya terus
-    // menjalankan inferensi. Menghentikannya di sini membebaskan CPU untuk
-    // WebView yang merender model 3D. Preview kamera tetap hidup.
-    if (_showResult) return;
+    // Inferensi sengaja TIDAK dihentikan saat hasil tampil: aset 3D mengikuti
+    // koin, jadi posisinya harus terus diperbarui. Ini memang lebih berat
+    // daripada sebelumnya — throttle di bawah yang menahan biayanya.
 
     final now = DateTime.now();
     if (_lastProcessedTime != null &&
-        now.difference(_lastProcessedTime!).inMilliseconds < 250) {
+        now.difference(_lastProcessedTime!).inMilliseconds < 150) {
       return;
     }
 
@@ -214,18 +341,28 @@ class _ARScannerScreenState extends State<ARScannerScreen>
 
       HeroModel? hero;
 
-      // 1. Image labeling dulu. Objek seperti barong/rangda tidak punya teks,
+      // 1. Object detection dulu. Objek seperti barong/rangda tidak punya teks,
       //    jadi menjalankan OCR lebih awal hanya menambah ratusan milidetik
       //    per frame untuk hasil yang sudah pasti kosong.
-      if (_imageLabelerReady && _imageLabeler != null) {
+      Rect? rect;
+      var sawAnyObject = false;
+      if (_objectDetectorReady && _objectDetector != null) {
         try {
-          final labels = await _imageLabeler!.processImage(inputImage);
-          // Urutkan supaya kandidat paling yakin diperiksa lebih dulu.
-          labels.sort((a, b) => b.confidence.compareTo(a.confidence));
-          hero = _matchCoinByImage(labels);
+          final objects = await _objectDetector!.processImage(inputImage);
+          sawAnyObject = objects.isNotEmpty;
+          for (final obj in objects) {
+            final labels = [...obj.labels]
+              ..sort((a, b) => b.confidence.compareTo(a.confidence));
+            final match = _matchCoinByImage(labels);
+            if (match != null) {
+              hero = match;
+              rect = obj.boundingBox;
+              break;
+            }
+          }
         } catch (e) {
-          debugPrint('⚠️ Image labeling error (skipped): $e');
-          _imageLabelerReady = false;
+          debugPrint('⚠️ Object detection error (skipped): $e');
+          _objectDetectorReady = false;
         }
       }
 
@@ -237,9 +374,34 @@ class _ARScannerScreenState extends State<ARScannerScreen>
       }
 
       if (mounted) {
+        // Posisi diperbarui walau hero-nya sama, supaya aset 3D terus mengikuti.
+        // Frame yang meleset (model mengembalikan 'background') SENGAJA tidak
+        // menghapus kotak terakhir: mengosongkannya membuat anchor jatuh ke
+        // tengah layar, dan aset terlihat melompat bolak-balik.
+        if (rect != null) {
+          // Dihaluskan di sumbernya, bukan lewat animasi widget yang panjang:
+          // kotak dari detektor berderak antar-frame, tapi animasi widget
+          // membuat model tertinggal di belakang koin.
+          final prev = _trackedRect;
+          final smoothed = prev == null
+              ? rect
+              : Rect.fromLTRB(
+                  prev.left + (rect.left - prev.left) * 0.5,
+                  prev.top + (rect.top - prev.top) * 0.5,
+                  prev.right + (rect.right - prev.right) * 0.5,
+                  prev.bottom + (rect.bottom - prev.bottom) * 0.5,
+                );
+          if (smoothed != _trackedRect) {
+            setState(() => _trackedRect = smoothed);
+            // Ukuran koin berubah -> jarak kamera 3D ikut disesuaikan.
+            _pushSizeToModel();
+          }
+        }
+
         if (hero != null) {
           _missingFrames = 0;
-          if (_scannedHero == null || _scannedHero!.name['id'] != hero.name['id']) {
+          if (_scannedHero == null ||
+              _scannedHero!.name['id'] != hero.name['id']) {
             setState(() {
               _scannedHero = hero;
               _showResult = true;
@@ -247,13 +409,33 @@ class _ARScannerScreenState extends State<ARScannerScreen>
             _lockController.forward(from: 0);
             _revealController.forward(from: 0);
             if (mounted) {
-              debugPrint('✅ Image match (Skenario 1): ${hero.getName(LanguageManager.currentLanguage.value)}');
+              debugPrint(
+                  '✅ Image match (Skenario 1): ${hero.getName(LanguageManager.currentLanguage.value)}');
               _playHeroAudio(hero);
             }
           }
         } else {
           _missingFrames++;
-          // AR panel now persists until user manually closes it.
+          // Koin sudah lama tidak terlihat: seluruh overlay dilepas, bukan
+          // hanya aset 3D. Menyisakan kartu keterangan yang mengambang tanpa
+          // objek yang dijelaskannya tidak masuk akal di tampilan AR.
+          final limit = sawAnyObject
+              ? _kFramesBeforeDropUnmatched
+              : _kFramesBeforeDropNoObject;
+          if (_missingFrames >= limit && _showResult) {
+            debugPrint('👋 Objek hilang, overlay dilepas');
+            if (_isPlayingAudio) {
+              await _audioPlayer.stop();
+            }
+            setState(() {
+              _trackedRect = null;
+              _showResult = false;
+              _scannedHero = null;
+              _isPlayingAudio = false;
+              _panelDragDelta = Offset.zero;
+              _panelExpanded = false;
+            });
+          }
         }
       }
     } catch (e) {
@@ -287,9 +469,9 @@ class _ARScannerScreenState extends State<ARScannerScreen>
   static const double _kMinLabelConfidence = 0.70;
 
   /// Mencocokkan koin berdasarkan gambar (image labeling / classification)
-  HeroModel? _matchCoinByImage(List<ImageLabel> labels) {
+  HeroModel? _matchCoinByImage(List<Label> labels) {
     for (final label in labels) {
-      final labelText = label.label.trim().toLowerCase();
+      final labelText = label.text.trim().toLowerCase();
       debugPrint('🔍 Label: "$labelText" confidence=${label.confidence}');
 
       if (label.confidence < _kMinLabelConfidence) continue;
@@ -320,7 +502,8 @@ class _ARScannerScreenState extends State<ARScannerScreen>
         return;
       }
       if (FileHelper.isLocalFile(hero.audio)) {
-        await _audioPlayer.play(DeviceFileSource(hero.audio));
+        await _audioPlayer.play(
+            DeviceFileSource(FileHelper.resolve(hero.audio)));
       } else {
         await _audioPlayer.play(AssetSource(hero.audio));
       }
@@ -334,10 +517,53 @@ class _ARScannerScreenState extends State<ARScannerScreen>
     }
   }
 
+  /// Tinggi model yang diinginkan di layar, dalam piksel logis.
+  /// Diturunkan dari TINGGI kotak koin, bukan lebar atau diagonalnya: siluet
+  /// model berubah lebar drastis saat theta berputar, sedangkan tingginya
+  /// praktis tetap — memakai lebar akan membuat modelnya memompa membesar
+  /// dan mengecil setiap kali perangkat diputar.
+  /// Model yang dimuat ke WebView. Dipilih lebih awal — sebelum apa pun
+  /// terdeteksi — supaya WebView sudah panas saat koin ditemukan.
+  String? _lastWarmModel;
+
+  String? get _warmModelPath {
+    final hero = _scannedHero;
+    if (hero != null && hero.model.isNotEmpty) {
+      _lastWarmModel = hero.model;
+      return hero.model;
+    }
+    // Bertahan pada model terakhir, bukan kembali ke model pertama. Mengganti
+    // src berarti WebView memuat ulang dari nol — kalau ia mundur ke default
+    // tiap overlay ditutup, memindai objek yang sama dua kali akan membayar
+    // ongkos muat penuh untuk kedua kalinya.
+    if (_lastWarmModel != null) return _lastWarmModel;
+    for (final h in mockHeroes) {
+      if (h.model.isNotEmpty) return _lastWarmModel = h.model;
+    }
+    return null;
+  }
+
+  double? _targetModelHeightPx() {
+    final screen = _lastScreenSize;
+    if (screen == null) return null;
+    final r = _trackedRectOnScreen(screen);
+    if (r == null) return null;
+    return (r.height * _kModelHeightVsCoin).clamp(40.0, _modelSide * 0.95);
+  }
+
+  void _pushSizeToModel() {
+    final controller = _modelWebView;
+    final px = _targetModelHeightPx();
+    if (controller == null || px == null) return;
+    controller.runJavaScript(
+      'window.setSize && window.setSize(${px.toStringAsFixed(1)});',
+    );
+  }
+
   @override
   void dispose() {
     _textRecognizer.close();
-    _imageLabeler?.close();
+    _objectDetector?.close();
     _audioPlayer.dispose();
     _controller?.stopImageStream();
     _controller?.dispose();
@@ -350,28 +576,36 @@ class _ARScannerScreenState extends State<ARScannerScreen>
 
   @override
   Widget build(BuildContext context) {
-    // Inisialisasi posisi panel di tengah layar (sekali saja)
-    if (!_panelPositionInitialized) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        final size = MediaQuery.of(context).size;
-        setState(() {
-          // Ditaruh di bawah reticle, bukan di tengah layar. Sebelumnya panel
-          // muncul persis menimpa objek yang sedang dipindai.
-          _panelOffset = Offset(
-            (size.width - 280) / 2,
-            size.height / 2 + 110,
-          );
-          _panelPositionInitialized = true;
-        });
-      });
-    }
-
     // Satu hero menampilkan SATU hal saja: model 3D atau kartu keterangan.
     final hero = _scannedHero;
+    final screen = MediaQuery.of(context).size;
+    final trackedOnScreen = _trackedRectOnScreen(screen);
+    final anchor =
+        trackedOnScreen?.center ?? Offset(screen.width / 2, screen.height / 2);
+    // Kotak render TETAP. Mengubah ukuran platform view tiap frame memaksa
+    // WebView relayout dan model-viewer membingkai ulang — jauh lebih mahal
+    // daripada sekadar mengubah jarak kamera 3D di dalamnya.
+    final modelSide = math.min(screen.shortestSide * 0.95, 560.0);
+    _lastScreenSize = screen;
+    _modelSide = modelSide;
+
+    // Aset 3D menempel pada koin, jadi ia hanya masuk akal selama posisinya
+    // diketahui. Begitu pelacakan lepas lebih dari masa tenggang, seluruh
+    // overlay dilepas di _processCameraImage — termasuk kartu keterangan.
+    final warmModel = _warmModelPath;
+    // Tinggi model yang benar-benar terlihat. Berbeda jauh dari modelSide,
+    // yaitu kotak WebView yang tetap besar — memposisikan apa pun terhadap
+    // kotak itu membuat semuanya terasa jauh dari asetnya.
+    final modelPx = _targetModelHeightPx() ?? 120.0;
     final show3d = _showResult &&
         hero != null &&
-        hero.effectiveDisplayMode == HeroModel.displayBoth;
-    final showPanel = _showResult && hero != null;
+        hero.effectiveDisplayMode == HeroModel.displayBoth &&
+        trackedOnScreen != null;
+    // Di mode 3D, kartu menunggu tombol info. Di mode 'Keterangan saja',
+    // kartu itulah satu-satunya isi, jadi langsung tampil.
+    final showPanel =
+        _showResult && hero != null && (!show3d || _panelExpanded);
+    final showInfoButton = show3d && _modelReady && !_panelExpanded;
 
     return Scaffold(
       backgroundColor: Colors.black,
@@ -382,7 +616,8 @@ class _ARScannerScreenState extends State<ARScannerScreen>
           if (_isCameraInitialized && _controller != null)
             _buildCamera()
           else
-            const Center(child: CircularProgressIndicator(color: Color(0xFF6A0DAD))),
+            const Center(
+                child: CircularProgressIndicator(color: Color(0xFF6A0DAD))),
 
           // LAYER 1.5: Sapuan scanline, hanya saat masih mencari
           if (!_showResult)
@@ -392,70 +627,170 @@ class _ARScannerScreenState extends State<ARScannerScreen>
                   animation: _rotateController,
                   builder: (_, __) => CustomPaint(
                     size: Size.infinite,
-                    painter: _ScanlinePainter(progress: _rotateController.value),
+                    painter:
+                        _ScanlinePainter(progress: _rotateController.value),
                   ),
                 ),
               ),
             ),
 
-          // LAYER 2: AR targeting ring (tengah)
-          _buildARTargeting(),
+          // LAYER 2: Cincin bidik, menempel pada koin yang terlacak
+          AnimatedPositioned(
+            duration: const Duration(milliseconds: 260),
+            curve: Curves.easeOut,
+            left: anchor.dx - 100,
+            top: anchor.dy - 100,
+            width: 200,
+            height: 200,
+            child: _buildARTargeting(),
+          ),
 
           // LAYER 2.2: Model 3D melayang tepat di titik bidik. Dirender oleh
           // <model-viewer> di dalam WebView transparan, jadi tidak butuh
           // ARCore dan tetap jalan di perangkat apa pun.
-          if (show3d)
-            Center(
-              child: SizedBox(
-                width: 300,
-                height: 300,
+          // Dipasang sejak layar dibuka dan TIDAK pernah dibongkar saat aset
+          // disembunyikan. Membongkarnya berarti WebView, mesin render 3D
+          // (956 KB) dan berkas GLB (882 KB) harus dimuat ulang dari nol setiap
+          // kali koin terdeteksi — itulah penyebab aset lama keluarnya.
+          if (warmModel != null)
+            AnimatedPositioned(
+              // Dipersingkat dari 260 ms: dengan easing panjang, model berenang
+              // menyusul koin seperempat detik kemudian alih-alih menempel.
+              duration: const Duration(milliseconds: 110),
+              curve: Curves.linear,
+              left: anchor.dx - modelSide / 2,
+              top: anchor.dy - modelSide / 2,
+              width: modelSide,
+              height: modelSide,
+              child: IgnorePointer(
+                ignoring: !show3d,
+                // Opacity, bukan Offstage: Offstage melayout anaknya dengan
+                // ukuran nol, sehingga clientHeight jadi 0 dan kalibrasi
+                // piksel-per-meter di dalam JS ikut rusak.
+                child: Opacity(
+                  // BUKAN 0.0: RenderOpacity melewati pelukisan sepenuhnya
+                  // saat alpha nol, sehingga WebView tidak pernah dirender dan
+                  // "pemanasan" ini tidak memanaskan apa pun. 0.004 membulat
+                  // ke alpha 1 — kasatmata tidak terlihat, tapi tetap dilukis.
+                  opacity: show3d ? 1.0 : 0.004,
+                  child: SizedBox(
+                width: modelSide,
+                height: modelSide,
                 child: ModelViewer(
-                  key: ValueKey(_scannedHero!.model),
+                  key: ValueKey(warmModel),
                   // Path relatif tanpa skema. model_viewer_plus me-redirect
                   // src apa pun yang absolute (termasuk 'asset:///...') ke
                   // WebView, dan skema itu tidak dikenal browser sehingga
                   // modelnya gagal dimuat. Tanpa skema, ia dibaca rootBundle.
-                  src: _scannedHero!.model,
-                  alt: _scannedHero!.getName(
-                      LanguageManager.currentLanguage.value),
-                  autoRotate: true,
+                  // Berkas dari penyimpanan perangkat harus memakai skema
+                  // file:// — tanpa itu model_viewer_plus mencarinya di dalam
+                  // rootBundle dan gagal. Aset bawaan tetap path relatif.
+                  src: FileHelper.isLocalFile(warmModel)
+                      ? Uri.file(FileHelper.resolve(warmModel)).toString()
+                      : warmModel,
+                  alt: hero?.getName(LanguageManager.currentLanguage.value) ??
+                      'Model 3D',
+                  // Tanpa ini, GLB beranimasi tampil diam di pose awalnya.
+                  autoPlay: true,
+                  // Muat segera, jangan tunggu terlihat — justru itu intinya.
+                  loading: Loading.eager,
+                  // Diputar dengan jari. autoRotate tetap mati supaya model
+                  // diam sampai pengguna sendiri yang menggesernya.
+                  autoRotate: false,
                   cameraControls: true,
                   disableZoom: true,
+                  disablePan: true,
+                  disableTap: true,
+                  interactionPrompt: InteractionPrompt.none,
+                  // Batas orbit bawaan model-viewer mengunci radius ke rentang
+                  // sempit dengan 105% sebagai PLAFON — artinya model hanya bisa
+                  // mengecil, tidak pernah membesar. Tanpa membuka batas ini,
+                  // penguncian ukuran ke koin mustahil. Satuan meter dipakai
+                  // supaya lepas dari persentase yang basisnya berbeda-beda.
+                  // phi dikunci di kisaran tegak (75°-95°) supaya model tidak
+                  // bisa direbahkan jadi tampak-atas. Geseran jari praktis
+                  // tinggal kiri-kanan saja.
+                  minCameraOrbit: 'auto 75deg 5m',
+                  maxCameraOrbit: 'auto 95deg 120m',
+                  cameraOrbit: '0deg 75deg 105%',
+                  interpolationDecay: 25,
+                  relatedJs: _kLockJs,
+                  // Bilah progres bawaan model-viewer digambar di tepi atas
+                  // elemennya selebar penuh. Karena kotak WebView hampir
+                  // selebar layar, ia tampak sebagai garis panjang melintang
+                  // di atas aset.
+                  relatedCss: 'model-viewer::part(default-progress-bar)'
+                      '{display:none !important;}',
                   backgroundColor: Colors.transparent,
+                  onWebViewCreated: (controller) {
+                    _modelWebView = controller;
+                    // Model berganti berarti memuat dari nol lagi; tombol info
+                    // harus menunggu sinyal siap yang baru.
+                    if (_modelReady) {
+                      WidgetsBinding.instance.addPostFrameCallback((_) {
+                        if (mounted) setState(() => _modelReady = false);
+                      });
+                    }
+                  },
+                  javascriptChannels: {
+                    JavascriptChannel('ModelReady',
+                        onMessageReceived: (msg) {
+                      debugPrint('⏱️ Model 3D siap dalam ${msg.message} ms '
+                          'sejak halaman model-viewer dimuat');
+                      if (mounted && !_modelReady) {
+                        setState(() => _modelReady = true);
+                      }
+                    }),
+                  },
                   // Tombol AR bawaan model-viewer. Ia mendeteksi sendiri
                   // dukungan perangkat, jadi tombolnya otomatis tidak muncul
                   // di perangkat tanpa ARCore/ARKit.
                   ar: true,
                   arModes: const ['scene-viewer', 'webxr', 'quick-look'],
-                ),
-              ),
-            ),
-
-          // LAYER 2.5: Garis penghubung reticle -> panel. Inilah yang membuat
-          // panel terbaca sebagai label milik objek, bukan kartu yang melayang
-          // lepas di atas video.
-          if (showPanel && _panelPositionInitialized)
-            IgnorePointer(
-              child: RepaintBoundary(
-                child: AnimatedBuilder(
-                  animation:
-                      Listenable.merge([_rotateController, _revealController]),
-                  builder: (_, __) => CustomPaint(
-                    size: Size.infinite,
-                    painter: _ARConnectorPainter(
-                      panelOffset: _panelOffset,
-                      panelSize: _panelSize ?? const Size(280, 200),
-                      phase: _rotateController.value,
-                      reveal: _panelReveal,
                     ),
                   ),
                 ),
               ),
             ),
 
-          // LAYER 3: Draggable info panel
-          if (showPanel) _buildDraggablePanel(),
+          // Tombol info di bawah aset, sejajar tengah, dan baru muncul setelah
+          // modelnya benar-benar siap — bukan mendahuluinya. Ia menghilang saat
+          // kartu dibuka, jadi keduanya tidak pernah bertumpuk.
+          if (showInfoButton)
+            AnimatedPositioned(
+              duration: const Duration(milliseconds: 110),
+              curve: Curves.linear,
+              left: anchor.dx - 22,
+              top: anchor.dy + modelPx / 2 + 10,
+              width: 44,
+              height: 44,
+              child: GestureDetector(
+                onTap: () {
+                  setState(() => _panelExpanded = true);
+                  _revealController.forward(from: 0);
+                },
+                child: Container(
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF0A0E27).withValues(alpha: 0.85),
+                    shape: BoxShape.circle,
+                    border:
+                        Border.all(color: const Color(0xFFD01B98), width: 1.5),
+                    boxShadow: [
+                      BoxShadow(
+                        color: const Color(0xFF6A0DAD).withValues(alpha: 0.35),
+                        blurRadius: 16,
+                        spreadRadius: 2,
+                      ),
+                    ],
+                  ),
+                  child: const Icon(Icons.info_outline,
+                      color: Colors.white, size: 20),
+                ),
+              ),
+            ),
 
+          // LAYER 3: Draggable info panel
+          if (showPanel) _buildDraggablePanel(anchor, screen, modelPx),
 
           // LAYER 4: Top HUD
           Column(
@@ -486,9 +821,8 @@ class _ARScannerScreenState extends State<ARScannerScreen>
     // Saat layar portrait, CameraPreview memutar gambarnya sehingga rasio yang
     // terlihat menjadi kebalikannya.
     final previewRatio = controller.value.aspectRatio;
-    final childHeight = isLandscape
-        ? screen.width / previewRatio
-        : screen.width * previewRatio;
+    final childHeight =
+        isLandscape ? screen.width / previewRatio : screen.width * previewRatio;
 
     return ClipRect(
       child: OverflowBox(
@@ -549,20 +883,40 @@ class _ARScannerScreenState extends State<ARScannerScreen>
     );
   }
 
+  /// Memetakan kotak objek dari koordinat gambar ke koordinat layar.
+  /// Harus memakai aturan yang sama dengan _buildCamera(): gambar tegak
+  /// di-cover ke layar, sisi yang berlebih dipotong dan sisanya ditengahkan.
+  Rect? _trackedRectOnScreen(Size screen) {
+    final rect = _trackedRect;
+    final src = _trackedSourceSize;
+    if (rect == null || src == null || src.isEmpty) return null;
+
+    final scale =
+        math.max(screen.width / src.width, screen.height / src.height);
+    final dx = (screen.width - src.width * scale) / 2;
+    final dy = (screen.height - src.height * scale) / 2;
+
+    return Rect.fromLTRB(
+      rect.left * scale + dx,
+      rect.top * scale + dy,
+      rect.right * scale + dx,
+      rect.bottom * scale + dy,
+    );
+  }
+
   /// Progres kemunculan panel keterangan.
   /// Di mode 'both' panel ditahan sampai paruh kedua, supaya model 3D sempat
   /// tampil lebih dulu; di mode 'panel' ia langsung berjalan dari awal.
   double get _panelReveal {
-    final staged =
-        _scannedHero?.effectiveDisplayMode == HeroModel.displayBoth;
-    const stagedInterval = Interval(0.6, 1.0, curve: Curves.easeOutCubic);
-    const instantInterval = Interval(0.0, 0.4, curve: Curves.easeOutCubic);
-    return (staged ? stagedInterval : instantInterval)
-        .transform(_revealController.value);
+    // Dulu di mode 3D kemunculannya ditunda agar aset sempat tampil lebih dulu.
+    // Penundaan itu tidak diperlukan lagi: kartunya kini dibuka manual lewat
+    // tombol info, jadi begitu diminta ia harus langsung naik.
+    const interval = Interval(0.0, 0.4, curve: Curves.easeOutCubic);
+    return interval.transform(_revealController.value);
   }
 
   // ===== DRAGGABLE INFO PANEL =====
-  Widget _buildDraggablePanel() {
+  Widget _buildDraggablePanel(Offset anchor, Size screen, double modelPx) {
     final hero = _scannedHero!;
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -572,13 +926,24 @@ class _ARScannerScreenState extends State<ARScannerScreen>
       }
     });
 
-    return Positioned(
-      left: _panelOffset.dx,
-      top: _panelOffset.dy,
+    final panelSize = _panelSize ?? const Size(280, 200);
+    // Posisi dasar: di bawah aset 3D, ditambah geseran manual pengguna.
+    // Sengaja TIDAK di-clamp ke tepi layar: menahannya di tepi membuat kartu
+    // lepas dari koin dan terlihat palsu. Lebih baik ikut bergeser keluar dan
+    // terpotong, seperti benda yang benar-benar menempel pada objeknya.
+    final left = anchor.dx - panelSize.width / 2 + _panelDragDelta.dx;
+    final top =
+        anchor.dy + modelPx / 2 + _kPanelGapFromModel + _panelDragDelta.dy;
+
+    return AnimatedPositioned(
+      duration: const Duration(milliseconds: 260),
+      curve: Curves.easeOut,
+      left: left,
+      top: top,
       child: GestureDetector(
         onPanUpdate: (details) {
           setState(() {
-            _panelOffset += details.delta;
+            _panelDragDelta += details.delta;
           });
         },
         child: AnimatedBuilder(
@@ -589,12 +954,9 @@ class _ARScannerScreenState extends State<ARScannerScreen>
             // di 0 supaya teksnya tetap terbaca saat diam.
             final t = _panelReveal;
             if (t <= 0.0) return const SizedBox.shrink();
-            final screen = MediaQuery.of(context).size;
-            final panelCenter = _panelOffset +
-                Offset(140, (_panelSize?.height ?? 200) / 2);
-            final travel =
-                (Offset(screen.width / 2, screen.height / 2) - panelCenter) *
-                    (1 - t);
+            final panelCenter =
+                Offset(left + panelSize.width / 2, top + panelSize.height / 2);
+            final travel = (anchor - panelCenter) * (1 - t);
 
             return Opacity(
               opacity: t,
@@ -638,7 +1000,8 @@ class _ARScannerScreenState extends State<ARScannerScreen>
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const SizedBox(width: 24), // Placeholder untuk balance layout
+                    const SizedBox(
+                        width: 24), // Placeholder untuk balance layout
                     Container(
                       width: 40,
                       height: 4,
@@ -650,9 +1013,23 @@ class _ARScannerScreenState extends State<ARScannerScreen>
                     ),
                     GestureDetector(
                       onTap: () {
+                        // Di mode 3D, menutup kartu berarti kembali ke tombol
+                        // info — asetnya tetap terkunci pada koin. Di mode
+                        // 'Keterangan saja', kartu itu satu-satunya isi,
+                        // sehingga menutupnya membubarkan overlay.
+                        if (hero.effectiveDisplayMode ==
+                            HeroModel.displayBoth) {
+                          setState(() {
+                            _panelExpanded = false;
+                            _panelDragDelta = Offset.zero;
+                          });
+                          return;
+                        }
                         setState(() {
                           _showResult = false;
                           _scannedHero = null;
+                          _trackedRect = null;
+                          _panelDragDelta = Offset.zero;
                         });
                         if (_isPlayingAudio) {
                           _audioPlayer.stop();
@@ -666,7 +1043,8 @@ class _ARScannerScreenState extends State<ARScannerScreen>
                           color: Colors.white.withValues(alpha: 0.1),
                           shape: BoxShape.circle,
                         ),
-                        child: const Icon(Icons.close, color: Colors.white70, size: 16),
+                        child: const Icon(Icons.close,
+                            color: Colors.white70, size: 16),
                       ),
                     ),
                   ],
@@ -676,77 +1054,79 @@ class _ARScannerScreenState extends State<ARScannerScreen>
                 // '3D + keterangan' karena model 3D sudah mengambil perannya
                 // sebagai visual utama; menampilkan keduanya cuma mengulang.
                 if (hero.effectiveDisplayMode != HeroModel.displayBoth) ...[
-                GestureDetector(
-                  onTap: () => _playHeroAudio(hero),
-                  child: Stack(
-                    alignment: Alignment.center,
-                    children: [
-                      Container(
-                        width: 90,
-                        height: 90,
-                        decoration: BoxDecoration(
-                          shape: BoxShape.circle,
-                          border: Border.all(
-                            color: _isPlayingAudio ? Colors.greenAccent : const Color(0xFF6A0DAD),
-                            width: 2.5,
-                          ),
-                          boxShadow: [
-                            BoxShadow(
-                              color: (_isPlayingAudio
-                                      ? Colors.greenAccent
-                                      : const Color(0xFF6A0DAD))
-                                  .withValues(alpha: 0.5),
-                              blurRadius: 20,
-                              spreadRadius: 3,
-                            ),
-                          ],
-                        ),
-                        child: ClipOval(
-                          child: FileHelper.isLocalFile(hero.image)
-                              ? Image.file(
-                                  File(hero.image),
-                                  fit: BoxFit.cover,
-                                  errorBuilder: (_, __, ___) => Container(
-                                    color: Colors.blueGrey[900],
-                                    child: const Icon(Icons.person,
-                                        size: 40, color: Colors.grey),
-                                  ),
-                                )
-                              : Image.asset(
-                                  hero.image,
-                                  fit: BoxFit.cover,
-                                  errorBuilder: (_, __, ___) => Container(
-                                    color: Colors.blueGrey[900],
-                                    child: const Icon(Icons.person,
-                                        size: 40, color: Colors.grey),
-                                  ),
-                                ),
-                        ),
-                      ),
-                      // Ikon audio overlay
-                      Positioned(
-                        bottom: 0,
-                        right: 0,
-                        child: Container(
-                          padding: const EdgeInsets.all(4),
+                  GestureDetector(
+                    onTap: () => _playHeroAudio(hero),
+                    child: Stack(
+                      alignment: Alignment.center,
+                      children: [
+                        Container(
+                          width: 90,
+                          height: 90,
                           decoration: BoxDecoration(
-                            color: _isPlayingAudio
-                                ? Colors.greenAccent
-                                : const Color(0xFFD01B98),
                             shape: BoxShape.circle,
+                            border: Border.all(
+                              color: _isPlayingAudio
+                                  ? Colors.greenAccent
+                                  : const Color(0xFF6A0DAD),
+                              width: 2.5,
+                            ),
+                            boxShadow: [
+                              BoxShadow(
+                                color: (_isPlayingAudio
+                                        ? Colors.greenAccent
+                                        : const Color(0xFF6A0DAD))
+                                    .withValues(alpha: 0.5),
+                                blurRadius: 20,
+                                spreadRadius: 3,
+                              ),
+                            ],
                           ),
-                          child: Icon(
-                            _isPlayingAudio
-                                ? Icons.stop_rounded
-                                : Icons.volume_up_rounded,
-                            size: 16,
-                            color: Colors.white,
+                          child: ClipOval(
+                            child: FileHelper.isLocalFile(hero.image)
+                                ? Image.file(
+                                    File(FileHelper.resolve(hero.image)),
+                                    fit: BoxFit.cover,
+                                    errorBuilder: (_, __, ___) => Container(
+                                      color: Colors.blueGrey[900],
+                                      child: const Icon(Icons.person,
+                                          size: 40, color: Colors.grey),
+                                    ),
+                                  )
+                                : Image.asset(
+                                    hero.image,
+                                    fit: BoxFit.cover,
+                                    errorBuilder: (_, __, ___) => Container(
+                                      color: Colors.blueGrey[900],
+                                      child: const Icon(Icons.person,
+                                          size: 40, color: Colors.grey),
+                                    ),
+                                  ),
                           ),
                         ),
-                      ),
-                    ],
+                        // Ikon audio overlay
+                        Positioned(
+                          bottom: 0,
+                          right: 0,
+                          child: Container(
+                            padding: const EdgeInsets.all(4),
+                            decoration: BoxDecoration(
+                              color: _isPlayingAudio
+                                  ? Colors.greenAccent
+                                  : const Color(0xFFD01B98),
+                              shape: BoxShape.circle,
+                            ),
+                            child: Icon(
+                              _isPlayingAudio
+                                  ? Icons.stop_rounded
+                                  : Icons.volume_up_rounded,
+                              size: 16,
+                              color: Colors.white,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
-                ),
                   const SizedBox(height: 10),
                 ] else if (hero.audio.isNotEmpty) ...[
                   // Foto itu juga merangkap tombol audio. Saat disembunyikan,
@@ -781,8 +1161,8 @@ class _ARScannerScreenState extends State<ARScannerScreen>
 
                 // Badge nominal
                 Container(
-                  padding: const EdgeInsets.symmetric(
-                      horizontal: 10, vertical: 3),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
                   decoration: BoxDecoration(
                     gradient: LinearGradient(
                       colors: [
@@ -793,73 +1173,69 @@ class _ARScannerScreenState extends State<ARScannerScreen>
                     borderRadius: BorderRadius.circular(8),
                   ),
                   child: ValueListenableBuilder<String>(
-                    valueListenable: LanguageManager.currentLanguage,
-                    builder: (context, lang, _) {
-                      return Text(
-                        hero.getCoin(lang),
-                        style: const TextStyle(
-                          color: Color(0xFFD01B98),
-                          fontSize: 11,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      );
-                    }
-                  ),
+                      valueListenable: LanguageManager.currentLanguage,
+                      builder: (context, lang, _) {
+                        return Text(
+                          hero.getCoin(lang),
+                          style: const TextStyle(
+                            color: Color(0xFFD01B98),
+                            fontSize: 11,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        );
+                      }),
                 ),
                 const SizedBox(height: 6),
 
                 // Nama
                 ValueListenableBuilder<String>(
-                  valueListenable: LanguageManager.currentLanguage,
-                  builder: (context, lang, _) {
-                    return Text(
-                      hero.getName(lang),
-                      textAlign: TextAlign.center,
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 15,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    );
-                  }
-                ),
+                    valueListenable: LanguageManager.currentLanguage,
+                    builder: (context, lang, _) {
+                      return Text(
+                        hero.getName(lang),
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 15,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      );
+                    }),
                 const SizedBox(height: 4),
 
                 // Deskripsi
                 ValueListenableBuilder<String>(
-                  valueListenable: LanguageManager.currentLanguage,
-                  builder: (context, lang, _) {
-                    return Text(
-                      hero.getDescription(lang),
-                      textAlign: TextAlign.center,
-                      maxLines: 3,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        color: Colors.white.withValues(alpha: 0.7),
-                        fontSize: 11,
-                        height: 1.3,
-                      ),
-                    );
-                  }
-                ),
+                    valueListenable: LanguageManager.currentLanguage,
+                    builder: (context, lang, _) {
+                      return Text(
+                        hero.getDescription(lang),
+                        textAlign: TextAlign.center,
+                        maxLines: 3,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          color: Colors.white.withValues(alpha: 0.7),
+                          fontSize: 11,
+                          height: 1.3,
+                        ),
+                      );
+                    }),
 
                 // Hint: klik untuk audio
                 const SizedBox(height: 8),
                 ValueListenableBuilder<String>(
-                  valueListenable: LanguageManager.currentLanguage,
-                  builder: (context, lang, _) {
-                    return Text(
-                      lang == 'id'
-                          ? '🔊 Ketuk gambar untuk mendengar'
-                          : '🔊 Tap image to listen',
-                      style: TextStyle(
-                        color: const Color(0xFFD01B98).withValues(alpha: 0.6),
-                        fontSize: 9,
-                        fontStyle: FontStyle.italic,
-                      ),
-                    );
-                  }
-                ),
+                    valueListenable: LanguageManager.currentLanguage,
+                    builder: (context, lang, _) {
+                      return Text(
+                        lang == 'id'
+                            ? '🔊 Ketuk gambar untuk mendengar'
+                            : '🔊 Tap image to listen',
+                        style: TextStyle(
+                          color: const Color(0xFFD01B98).withValues(alpha: 0.6),
+                          fontSize: 9,
+                          fontStyle: FontStyle.italic,
+                        ),
+                      );
+                    }),
               ],
             ),
           ),
@@ -884,81 +1260,86 @@ class _ARScannerScreenState extends State<ARScannerScreen>
             const Spacer(),
             // Language Switcher
             ValueListenableBuilder<String>(
-              valueListenable: LanguageManager.currentLanguage,
-              builder: (context, currentLang, _) {
-                return Container(
-                  height: 32,
-                  padding: const EdgeInsets.symmetric(horizontal: 8),
-                  decoration: BoxDecoration(
-                    color: Colors.black.withValues(alpha: 0.4),
-                    borderRadius: BorderRadius.circular(20),
-                    border: Border.all(color: Colors.white24),
-                  ),
-                  child: DropdownButtonHideUnderline(
-                    child: DropdownButton<String>(
-                      value: currentLang,
-                      dropdownColor: const Color(0xFF1E293B),
-                      icon: const Icon(Icons.language, color: Colors.white70, size: 16),
-                      style: const TextStyle(color: Colors.white, fontSize: 12),
-                      items: LanguageManager.supportedLanguages.map((lang) {
-                        return DropdownMenuItem<String>(
-                          value: lang['code'],
-                          child: Text(lang['name']!),
-                        );
-                      }).toList(),
-                      onChanged: (newLang) {
-                        if (newLang != null) {
-                          LanguageManager.changeLanguage(newLang, context);
-                        }
-                      },
+                valueListenable: LanguageManager.currentLanguage,
+                builder: (context, currentLang, _) {
+                  return Container(
+                    height: 32,
+                    padding: const EdgeInsets.symmetric(horizontal: 8),
+                    decoration: BoxDecoration(
+                      color: Colors.black.withValues(alpha: 0.4),
+                      borderRadius: BorderRadius.circular(20),
+                      border: Border.all(color: Colors.white24),
                     ),
-                  ),
-                );
-              }
-            ),
+                    child: DropdownButtonHideUnderline(
+                      child: DropdownButton<String>(
+                        value: currentLang,
+                        dropdownColor: const Color(0xFF1E293B),
+                        icon: const Icon(Icons.language,
+                            color: Colors.white70, size: 16),
+                        style:
+                            const TextStyle(color: Colors.white, fontSize: 12),
+                        items: LanguageManager.supportedLanguages.map((lang) {
+                          return DropdownMenuItem<String>(
+                            value: lang['code'],
+                            child: Text(lang['name']!),
+                          );
+                        }).toList(),
+                        onChanged: (newLang) {
+                          if (newLang != null) {
+                            LanguageManager.changeLanguage(newLang, context);
+                          }
+                        },
+                      ),
+                    ),
+                  );
+                }),
             const SizedBox(width: 12),
             // Status indicator
             ValueListenableBuilder<String>(
-              valueListenable: LanguageManager.currentLanguage,
-              builder: (context, currentLang, _) {
-                return AnimatedContainer(
-                  duration: const Duration(milliseconds: 300),
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                  decoration: BoxDecoration(
-                    color: _showResult
-                        ? const Color(0xFFD01B98).withValues(alpha: 0.6)
-                        : Colors.black.withValues(alpha: 0.4),
-                    borderRadius: BorderRadius.circular(16),
-                    border: Border.all(
+                valueListenable: LanguageManager.currentLanguage,
+                builder: (context, currentLang, _) {
+                  return AnimatedContainer(
+                    duration: const Duration(milliseconds: 300),
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                    decoration: BoxDecoration(
                       color: _showResult
-                          ? const Color(0xFFD01B98).withValues(alpha: 0.5)
-                          : const Color(0xFF6A0DAD).withValues(alpha: 0.4),
+                          ? const Color(0xFFD01B98).withValues(alpha: 0.6)
+                          : Colors.black.withValues(alpha: 0.4),
+                      borderRadius: BorderRadius.circular(16),
+                      border: Border.all(
+                        color: _showResult
+                            ? const Color(0xFFD01B98).withValues(alpha: 0.5)
+                            : const Color(0xFF6A0DAD).withValues(alpha: 0.4),
+                      ),
                     ),
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(
-                        _showResult ? Icons.check_circle : Icons.view_in_ar,
-                        color: Colors.white,
-                        size: 14,
-                      ),
-                      const SizedBox(width: 6),
-                      Text(
-                        _showResult
-                            ? (currentLang == 'id' ? "Terdeteksi" : "Detected")
-                            : (currentLang == 'id' ? "Scanning..." : "Scanning..."),
-                        style: const TextStyle(
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(
+                          _showResult ? Icons.check_circle : Icons.view_in_ar,
                           color: Colors.white,
-                          fontSize: 11,
-                          fontWeight: FontWeight.bold,
+                          size: 14,
                         ),
-                      ),
-                    ],
-                  ),
-                );
-              }
-            ),
+                        const SizedBox(width: 6),
+                        Text(
+                          _showResult
+                              ? (currentLang == 'id'
+                                  ? "Terdeteksi"
+                                  : "Detected")
+                              : (currentLang == 'id'
+                                  ? "Scanning..."
+                                  : "Scanning..."),
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 11,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ],
+                    ),
+                  );
+                }),
           ],
         ),
       ),
@@ -1029,12 +1410,14 @@ class _ScanRingPainter extends CustomPainter {
 
     canvas.drawLine(
       p,
-      Offset(p.dx + len * cos(angle + pi / 4), p.dy + len * sin(angle + pi / 4)),
+      Offset(
+          p.dx + len * cos(angle + pi / 4), p.dy + len * sin(angle + pi / 4)),
       paint,
     );
     canvas.drawLine(
       p,
-      Offset(p.dx + len * cos(angle - pi / 4), p.dy + len * sin(angle - pi / 4)),
+      Offset(
+          p.dx + len * cos(angle - pi / 4), p.dy + len * sin(angle - pi / 4)),
       paint,
     );
   }
@@ -1114,77 +1497,6 @@ class _LockedRingPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(covariant _LockedRingPainter old) => true;
-}
-
-// ===== GARIS PENGHUBUNG RETICLE -> PANEL =====
-// Menarik garis dari titik bidik ke tepi panel terdekat, sehingga panel
-// terbaca sebagai label yang menempel pada objek. Titik sambungnya dihitung
-// ulang setiap panel digeser, jadi hubungan itu tetap terasa saat di-drag.
-class _ARConnectorPainter extends CustomPainter {
-  final Offset panelOffset;
-  final Size panelSize;
-  final double phase;
-  final double reveal;
-
-  _ARConnectorPainter({
-    required this.panelOffset,
-    required this.panelSize,
-    required this.phase,
-    required this.reveal,
-  });
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final target = Offset(size.width / 2, size.height / 2);
-    final rect = panelOffset & panelSize;
-
-    // Titik pada tepi panel yang paling dekat ke reticle.
-    final anchor = Offset(
-      target.dx.clamp(rect.left, rect.right),
-      target.dy.clamp(rect.top, rect.bottom),
-    );
-
-    final t = Curves.easeOut.transform(reveal.clamp(0.0, 1.0));
-    if (t <= 0.01) return;
-    final end = Offset.lerp(target, anchor, t)!;
-    if ((end - target).distance < 4) return;
-
-    canvas.drawLine(
-      target,
-      end,
-      Paint()
-        ..shader = const LinearGradient(
-          colors: [Color(0x00D01B98), Color(0xCCD01B98)],
-        ).createShader(Rect.fromPoints(target, end))
-        ..strokeWidth = 1.6
-        ..strokeCap = StrokeCap.round,
-    );
-
-    // Titik cahaya yang merayap sepanjang garis, memberi kesan data mengalir.
-    final travel = Offset.lerp(target, end, (phase * 2) % 1.0)!;
-    canvas.drawCircle(
-      travel,
-      2.5,
-      Paint()..color = const Color(0xFFD01B98).withValues(alpha: 0.9),
-    );
-
-    // Simpul di tepi panel.
-    canvas.drawCircle(
-      end,
-      4,
-      Paint()
-        ..color = const Color(0xFFD01B98).withValues(alpha: 0.85)
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = 1.5,
-    );
-  }
-
-  @override
-  bool shouldRepaint(covariant _ARConnectorPainter old) =>
-      old.panelOffset != panelOffset ||
-      old.panelSize != panelSize ||
-      old.phase != phase ||
-      old.reveal != reveal;
 }
 
 // ===== SAPUAN SCANLINE =====

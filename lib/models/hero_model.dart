@@ -150,6 +150,10 @@ Future<void> loadHeroes() async {
     };
     for (var i = 0; i < mockHeroes.length; i++) {
       final fromAsset = assetModels[_heroKey(mockHeroes[i])];
+      // Menimpa, bukan sekadar mengisi yang kosong: model 3D kini hanya
+      // berasal dari assets dan tidak bisa diubah lewat Admin, jadi berkas di
+      // assets adalah kebenarannya. Kalau modelnya diganti pada rilis
+      // berikutnya, perangkat yang sudah punya data lama ikut memakai yang baru.
       if (fromAsset != null && mockHeroes[i].model != fromAsset) {
         mockHeroes[i] = mockHeroes[i].copyWith(model: fromAsset);
         modelsSynced++;
