@@ -37,6 +37,21 @@ def find_module(name, path=None):
 PYSHIM
 fi
 
+# Teachable Machine selalu menaruh labels.txt di samping modelnya. Kalau ada,
+# berkas ITU yang dipakai — urutan kelas langsung dari sumbernya, sehingga tidak
+# ada peluang tool/labels.txt tertinggal basi setelah model dilatih ulang.
+SRC_LABELS="$(dirname "$SRC")/labels.txt"
+if [ -f "$SRC_LABELS" ]; then
+  echo "Memakai urutan kelas dari $SRC_LABELS:"
+  # Format Teachable Machine berupa "0 barong"; nomornya dibuang.
+  sed -E 's/^[0-9]+[[:space:]]+//' "$SRC_LABELS" | sed '/^[[:space:]]*$/d' > "$ROOT/tool/labels.txt"
+  sed 's/^/  - /' "$ROOT/tool/labels.txt"
+else
+  echo "labels.txt tidak ada di samping model; memakai tool/labels.txt apa adanya:"
+  sed 's/^/  - /' "$ROOT/tool/labels.txt"
+fi
+echo
+
 "$VENV/bin/python" "$ROOT/tool/attach_metadata.py" \
   "$SRC" "$ROOT/tool/labels.txt" "$ROOT/assets/coin_model.tflite"
 

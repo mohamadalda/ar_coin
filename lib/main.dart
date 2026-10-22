@@ -7,6 +7,7 @@ import 'screens/home_screen.dart';
 import 'models/hero_model.dart';
 import 'utils/auth_service.dart';
 import 'utils/file_helper.dart';
+import 'utils/firebase_service.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -16,6 +17,10 @@ Future<void> main() async {
     debugPrint('Error: ${e.code}\nError Message: ${e.description}');
   }
   
+  // Harus sebelum loadHeroes() dan AuthService.init(): keduanya memeriksa
+  // apakah Firebase tersedia. Gagal di sini tidak fatal — lihat FirebaseService.
+  await FirebaseService.init();
+
   // Harus sebelum loadHeroes(): path berkas unggahan disimpan relatif dan
   // butuh folder dokumen aplikasi untuk bisa dibuka.
   await FileHelper.init();

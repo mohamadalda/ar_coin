@@ -13,11 +13,17 @@ import 'package:flutter/services.dart';
 import 'package:permission_handler/permission_handler.dart';
 import '../globals.dart';
 import '../models/hero_model.dart';
+import '../models/test_record.dart';
 import '../utils/file_helper.dart';
 import '../utils/language_manager.dart';
 
 class ARScannerScreen extends StatefulWidget {
-  const ARScannerScreen({super.key});
+  const ARScannerScreen({super.key, this.testExpected});
+
+  /// Bila diisi, layar berjalan dalam MODE UJI: ia mencatat deteksi pertama
+  /// lalu menutup diri sambil mengembalikan [TestRecord]. Nilai ini adalah
+  /// kebenaran acuan — objek yang seharusnya dikenali.
+  final HeroModel? testExpected;
 
   @override
   State<ARScannerScreen> createState() => _ARScannerScreenState();
@@ -29,9 +35,19 @@ class _ARScannerScreenState extends State<ARScannerScreen>
   bool _isCameraInitialized = false;
   bool _showResult = false;
 
-  /// Di mode '3D + keterangan', kartu keterangan tidak langsung muncul —
-  /// ia menutupi asetnya. Baru tampil setelah tombol info ditekan.
-  bool _panelExpanded = false;
+  /// Di mode 3D, menekan tombol bernama menukar tampilan dari aset 3D ke
+  /// gambar rincian koin. Keduanya tidak pernah tampil bersamaan.
+  bool _showInfoImage = false;
+
+  /// Penanda waktu mulai menguji dan pengaman agar hasilnya dilaporkan
+  /// tepat sekali — tanpa ini, frame berikutnya bisa menutup layar dua kali.
+  DateTime? _testStartedAt;
+  bool _testReported = false;
+  Timer? _testTimeout;
+
+  /// Batas waktu satu percobaan. Melebihi ini dihitung sebagai "tidak
+  /// terdeteksi", bukan dibiarkan menggantung tanpa hasil.
+  static const Duration _kTestTimeout = Duration(seconds: 15);
 
   /// Menjadi true setelah <model-viewer> selesai memuat dan merender model.
   /// Tombol info menunggu ini supaya tidak muncul mendahului asetnya.
@@ -99,6 +115,18 @@ class _ARScannerScreenState extends State<ARScannerScreen>
   /// 1.0 = setinggi koin. Naikkan kalau ingin modelnya lebih besar dari koin
   /// (2.0 berarti dua kali tinggi koin).
   static const double _kModelHeightVsCoin = 1.0;
+
+  /// Tinggi gambar rincian koin, sebagai kelipatan tinggi kotak koin.
+  ///
+  /// Angkanya DIUKUR dari berkasnya, bukan ditebak: pada kedua diagram, logam
+  /// koin hanya mengisi 51% tinggi gambar (sisanya label dan garis penunjuk).
+  /// Jadi agar koin yang digambar berukuran sama dengan koin fisik di depan
+  /// kamera, tinggi gambar harus 1/0,51 ≈ 1,96 kali tinggi koin.
+  static const double _kInfoImageVsCoin = 1.96;
+
+  /// Perbandingan lebar : tinggi kotak gambar rincian. Kedua diagram berukuran
+  /// sekitar 1,2:1, dan BoxFit.contain menangani selisih kecilnya.
+  static const double _kInfoImageAspect = 1.25;
 
   /// Disuntikkan sekali ke halaman model-viewer. Menghitung sendiri faktor
   /// piksel-per-meter dari dimensi model dan field-of-view yang BENAR-BENAR
@@ -175,9 +203,44 @@ class _ARScannerScreenState extends State<ARScannerScreen>
   late AnimationController _revealController;
   late Animation<double> _lockScale;
 
+  /// Menutup layar uji sambil melaporkan hasilnya. Dipanggil dari dua jalur —
+  /// deteksi berhasil dan batas waktu habis — sehingga perlu penjaga agar
+  /// tidak melapor dua kali.
+  void _reportTest({
+    required String detectedLabel,
+    required String detectedName,
+    required double confidence,
+  }) {
+    if (_testReported) return;
+    final expected = widget.testExpected;
+    if (expected == null) return;
+    _testReported = true;
+    _testTimeout?.cancel();
+
+    final started = _testStartedAt ?? DateTime.now();
+    final record = TestRecord(
+      expectedLabel: expected.label,
+      expectedName: expected.getName('id'),
+      detectedLabel: detectedLabel,
+      detectedName: detectedName,
+      confidence: confidence,
+      durationMs: DateTime.now().difference(started).inMilliseconds,
+      at: DateTime.now(),
+    );
+    if (mounted) Navigator.of(context).pop(record);
+  }
+
   @override
   void initState() {
     super.initState();
+
+    if (widget.testExpected != null) {
+      _testStartedAt = DateTime.now();
+      _testTimeout = Timer(_kTestTimeout, () {
+        // Label kosong = sistem tidak mengenali apa pun sampai waktu habis.
+        _reportTest(detectedLabel: '', detectedName: '', confidence: 0);
+      });
+    }
     _requestPermissionAndInitCamera();
     _initObjectDetector();
 
@@ -400,12 +463,25 @@ class _ARScannerScreenState extends State<ARScannerScreen>
 
         if (hero != null) {
           _missingFrames = 0;
-          if (_scannedHero == null ||
-              _scannedHero!.name['id'] != hero.name['id']) {
+          // Dibandingkan lewat label, bukan nama: dua varian koin bisa
+          // bernama sama persis, dan perbandingan berbasis nama membuat
+          // pergantian antar-varian tidak pernah terdeteksi sebagai hero baru.
+          if (_scannedHero == null || _scannedHero!.label != hero.label) {
             setState(() {
               _scannedHero = hero;
               _showResult = true;
             });
+            // Mode uji selesai pada deteksi PERTAMA: yang diukur adalah
+            // kemampuan mengenali, bukan apa yang terjadi sesudahnya.
+            if (widget.testExpected != null) {
+              _reportTest(
+                detectedLabel: hero.label,
+                detectedName: hero.getName('id'),
+                confidence: _lastMatchConfidence,
+              );
+              return;
+            }
+
             _lockController.forward(from: 0);
             _revealController.forward(from: 0);
             if (mounted) {
@@ -433,7 +509,7 @@ class _ARScannerScreenState extends State<ARScannerScreen>
               _scannedHero = null;
               _isPlayingAudio = false;
               _panelDragDelta = Offset.zero;
-              _panelExpanded = false;
+              _showInfoImage = false;
             });
           }
         }
@@ -468,6 +544,11 @@ class _ARScannerScreenState extends State<ARScannerScreen>
   /// sehingga 0.85 terlalu ketat dan membuat deteksi terasa lambat.
   static const double _kMinLabelConfidence = 0.70;
 
+  /// Confidence label yang menghasilkan kecocokan terakhir. Disimpan agar mode
+  /// uji bisa mencatat angka yang BENAR-BENAR dipakai mengambil keputusan,
+  /// bukan confidence tertinggi yang kebetulan ada di frame itu.
+  double _lastMatchConfidence = 0;
+
   /// Mencocokkan koin berdasarkan gambar (image labeling / classification)
   HeroModel? _matchCoinByImage(List<Label> labels) {
     for (final label in labels) {
@@ -485,6 +566,7 @@ class _ARScannerScreenState extends State<ARScannerScreen>
         // "koin_1000" dan "2" dengan "koin_200".
         if (hero.label.toLowerCase() == labelText) {
           debugPrint('✅ Image match: ${hero.getName('id')}');
+          _lastMatchConfidence = label.confidence;
           return hero;
         }
       }
@@ -543,6 +625,18 @@ class _ARScannerScreenState extends State<ARScannerScreen>
     return null;
   }
 
+  /// Tinggi kotak koin di layar, APA ADANYA tanpa pembatas.
+  ///
+  /// Dipisah dari [_targetModelHeightPx] karena pembatas di sana ada untuk
+  /// kotak WebView aset 3D — bukan untuk gambar rincian. Memakai nilai yang
+  /// sudah dibatasi itu membuat gambar berhenti ikut membesar/mengecil begitu
+  /// koin cukup dekat.
+  double? _coinHeightOnScreen() {
+    final screen = _lastScreenSize;
+    if (screen == null) return null;
+    return _trackedRectOnScreen(screen)?.height;
+  }
+
   double? _targetModelHeightPx() {
     final screen = _lastScreenSize;
     if (screen == null) return null;
@@ -571,6 +665,7 @@ class _ARScannerScreenState extends State<ARScannerScreen>
     _rotateController.dispose();
     _lockController.dispose();
     _revealController.dispose();
+    _testTimeout?.cancel();
     super.dispose();
   }
 
@@ -600,12 +695,37 @@ class _ARScannerScreenState extends State<ARScannerScreen>
     final show3d = _showResult &&
         hero != null &&
         hero.effectiveDisplayMode == HeroModel.displayBoth &&
-        trackedOnScreen != null;
+        trackedOnScreen != null &&
+        !_showInfoImage;
     // Di mode 3D, kartu menunggu tombol info. Di mode 'Keterangan saja',
     // kartu itulah satu-satunya isi, jadi langsung tampil.
-    final showPanel =
-        _showResult && hero != null && (!show3d || _panelExpanded);
-    final showInfoButton = show3d && _modelReady && !_panelExpanded;
+    final isBothMode = hero?.effectiveDisplayMode == HeroModel.displayBoth;
+    final hasInfoImage = (hero?.infoImage.isNotEmpty ?? false);
+
+    // Kartu keterangan hanya untuk hero mode 'Keterangan saja'. Di mode 3D,
+    // tombol bernama menukar aset dengan gambar rincian koin — bukan membuka
+    // kartu di atasnya.
+    final showPanel = _showResult && hero != null && !isBothMode;
+    final showInfoImage =
+        _showResult && hero != null && isBothMode && hasInfoImage && _showInfoImage;
+    // Tinggi gambar rincian, dibatasi agar tidak melebihi layar.
+    // TANPA pembatas sama sekali, dan dihitung dari tinggi koin mentah —
+    // bukan dari modelPx yang sudah dijepit demi kotak WebView. Pembatas apa
+    // pun di sini berarti gambar berhenti mengikuti koin pada jarak tertentu,
+    // dan kesamaan ukurannya dengan koin fisik hilang. Kalau koin sangat dekat
+    // gambarnya boleh terpotong tepi layar — sama seperti kartu keterangan.
+    final infoPx = (_coinHeightOnScreen() ?? 120.0) * _kInfoImageVsCoin;
+
+    // Tombol pengalih tampil di KEDUA keadaan, jadi pengguna selalu punya
+    // jalan bolak-balik antara aset 3D dan gambar rincian.
+    final showToggle = _showResult &&
+        hero != null &&
+        isBothMode &&
+        hasInfoImage &&
+        (_modelReady || _showInfoImage);
+
+    // Tombol diletakkan di bawah apa pun yang sedang tampil.
+    final assetPx = _showInfoImage ? infoPx : modelPx;
 
     return Scaffold(
       backgroundColor: Colors.black,
@@ -756,35 +876,87 @@ class _ARScannerScreenState extends State<ARScannerScreen>
           // Tombol info di bawah aset, sejajar tengah, dan baru muncul setelah
           // modelnya benar-benar siap — bukan mendahuluinya. Ia menghilang saat
           // kartu dibuka, jadi keduanya tidak pernah bertumpuk.
-          if (showInfoButton)
+          // Gambar rincian koin, menempel pada koin persis seperti aset 3D —
+          // ikut bergerak dan ikut mengecil saat kamera menjauh.
+          if (showInfoImage)
             AnimatedPositioned(
               duration: const Duration(milliseconds: 110),
               curve: Curves.linear,
-              left: anchor.dx - 22,
-              top: anchor.dy + modelPx / 2 + 10,
-              width: 44,
-              height: 44,
-              child: GestureDetector(
-                onTap: () {
-                  setState(() => _panelExpanded = true);
-                  _revealController.forward(from: 0);
-                },
-                child: Container(
-                  decoration: BoxDecoration(
-                    color: const Color(0xFF0A0E27).withValues(alpha: 0.85),
-                    shape: BoxShape.circle,
-                    border:
-                        Border.all(color: const Color(0xFFD01B98), width: 1.5),
-                    boxShadow: [
-                      BoxShadow(
-                        color: const Color(0xFF6A0DAD).withValues(alpha: 0.35),
-                        blurRadius: 16,
-                        spreadRadius: 2,
-                      ),
-                    ],
+              left: anchor.dx - infoPx * _kInfoImageAspect / 2,
+              top: anchor.dy - infoPx / 2,
+              width: infoPx * _kInfoImageAspect,
+              height: infoPx,
+              child: IgnorePointer(child: _buildInfoImage(hero)),
+            ),
+
+          // Tombol pengalih di bawah aset. Ada di kedua keadaan, dengan nama
+          // hero saat menampilkan 3D dan "Model 3D" saat menampilkan diagram —
+          // jadi arah perpindahannya selalu jelas.
+          if (showToggle)
+            AnimatedPositioned(
+              duration: const Duration(milliseconds: 110),
+              curve: Curves.linear,
+              left: anchor.dx - 90,
+              top: anchor.dy + assetPx / 2 + 10,
+              width: 180,
+              height: 42,
+              child: Center(
+                child: GestureDetector(
+                  onTap: () {
+                    final toImage = !_showInfoImage;
+                    // Audio dihentikan saat beralih ke diagram: pengguna
+                    // berpindah dari menikmati aset ke membaca rincian.
+                    if (toImage && _isPlayingAudio) {
+                      _audioPlayer.stop();
+                    }
+                    setState(() {
+                      _showInfoImage = toImage;
+                      if (toImage) _isPlayingAudio = false;
+                    });
+                    _revealController.forward(from: 0);
+                  },
+                  child: Container(
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 16, vertical: 9),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF0A0E27).withValues(alpha: 0.85),
+                      borderRadius: BorderRadius.circular(22),
+                      border: Border.all(
+                          color: const Color(0xFFD01B98), width: 1.5),
+                      boxShadow: [
+                        BoxShadow(
+                          color: const Color(0xFF6A0DAD).withValues(alpha: 0.35),
+                          blurRadius: 16,
+                          spreadRadius: 2,
+                        ),
+                      ],
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(
+                            _showInfoImage
+                                ? Icons.view_in_ar
+                                : Icons.info_outline,
+                            color: Colors.white,
+                            size: 17),
+                        const SizedBox(width: 7),
+                        Flexible(
+                          child: Text(
+                            _showInfoImage
+                                ? 'Model 3D'
+                                : hero.getName(
+                                    LanguageManager.currentLanguage.value),
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 14,
+                                fontWeight: FontWeight.w600),
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
-                  child: const Icon(Icons.info_outline,
-                      color: Colors.white, size: 20),
                 ),
               ),
             ),
@@ -915,6 +1087,34 @@ class _ARScannerScreenState extends State<ARScannerScreen>
     return interval.transform(_revealController.value);
   }
 
+  // ===== GAMBAR RINCIAN KOIN =====
+  /// Menggantikan aset 3D, dan menempel pada koin dengan cara yang sama:
+  /// posisinya mengikuti kotak deteksi dan ukurannya ikut jarak kamera.
+  ///
+  /// Tidak memakai InteractiveViewer: gestur cubit akan berebut dengan
+  /// pelacakan yang terus menggeser posisinya, sehingga gambar malah terasa
+  /// lepas dari koin.
+  Widget _buildInfoImage(HeroModel hero) {
+    return AnimatedBuilder(
+      animation: _revealController,
+      builder: (context, child) {
+        final t = Curves.easeOutCubic
+            .transform(_revealController.value.clamp(0.0, 1.0));
+        if (t <= 0.0) return const SizedBox.shrink();
+        return Opacity(
+          opacity: t,
+          child: Transform.scale(scale: 0.85 + 0.15 * t, child: child),
+        );
+      },
+      child: Image.asset(
+        hero.infoImage,
+        fit: BoxFit.contain,
+        filterQuality: FilterQuality.medium,
+        errorBuilder: (_, __, ___) => const SizedBox.shrink(),
+      ),
+    );
+  }
+
   // ===== DRAGGABLE INFO PANEL =====
   Widget _buildDraggablePanel(Offset anchor, Size screen, double modelPx) {
     final hero = _scannedHero!;
@@ -1020,7 +1220,7 @@ class _ARScannerScreenState extends State<ARScannerScreen>
                         if (hero.effectiveDisplayMode ==
                             HeroModel.displayBoth) {
                           setState(() {
-                            _panelExpanded = false;
+                            _showInfoImage = false;
                             _panelDragDelta = Offset.zero;
                           });
                           return;

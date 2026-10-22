@@ -11,6 +11,7 @@ apa pun di layar.
 
 Pakai lewat tool/attach_metadata.sh, jangan dipanggil langsung.
 """
+import os
 import shutil
 import sys
 
@@ -19,6 +20,30 @@ from tflite_support import metadata as _metadata
 from tflite_support import metadata_schema_py_generated as fb
 
 src, labels_path, out = sys.argv[1], sys.argv[2], sys.argv[3]
+
+# ML Kit hanya menerima classifier gambar 3 kanal (RGB). Export "TensorFlow
+# Lite for Microcontrollers" dari Teachable Machine menghasilkan 96x96x1
+# grayscale, dan itu tidak akan pernah jalan — lebih baik ditolak di sini
+# daripada gagal senyap di perangkat.
+import struct as _struct
+_raw = open(src, 'rb').read()
+_shapes = [(s, c) for s in (96, 128, 160, 192, 224, 256) for c in (1, 3)
+           if _struct.pack('<4i', 1, s, s, c) in _raw]
+if _shapes and all(c != 3 for _, c in _shapes):
+    sys.exit(
+        f"\nBentuk input model: {_shapes[0][0]}x{_shapes[0][0]}x{_shapes[0][1]} "
+        "(grayscale).\nML Kit menuntut classifier 3 kanal RGB.\n\n"
+        "Ini BUKAN soal tab export. Model 96x96 grayscale berarti project\n"
+        "Teachable Machine-nya bertipe 'Tiny Image Project' -- ukuran dan\n"
+        "grayscale itu melekat pada project, sehingga SEMUA opsi export\n"
+        "menghasilkan bentuk yang sama.\n\n"
+        "Yang harus dilakukan: buat project BARU di Teachable Machine,\n"
+        "pilih 'Image Project' -> 'Standard image model', unggah ulang foto\n"
+        "dari sumber aslinya (bukan dari berkas .tm, karena foto di dalamnya\n"
+        "sudah ikut dikecilkan ke 96x96), latih, lalu export lewat\n"
+        "'Tensorflow Lite' -> 'Floating point'. Hasilnya: model_unquant.tflite\n"
+        "dengan input 1x224x224x3.\n"
+    )
 
 m = fb.ModelMetadataT()
 m.name = 'IMAGO classifier'
@@ -70,8 +95,12 @@ m.subgraphMetadata = [sg]
 b = flatbuffers.Builder(0)
 b.Finish(m.Pack(b), _metadata.MetadataPopulator.METADATA_FILE_IDENTIFIER)
 
-shutil.copy(src, out)
-p = _metadata.MetadataPopulator.with_model_file(out)
+# Lewat berkas sementara, supaya aman walau src dan out adalah berkas yang
+# sama — memperbaiki model yang sudah terlanjur dipasang di assets.
+import tempfile
+tmp = os.path.join(tempfile.gettempdir(), 'attach_metadata_work.tflite')
+shutil.copy(src, tmp)
+p = _metadata.MetadataPopulator.with_model_file(tmp)
 p.load_metadata_buffer(b.Output())
 p.load_associated_files([labels_path])
 try:
@@ -84,6 +113,9 @@ except ValueError as e:
             "(model_unquant.tflite), bukan assets/coin_model.tflite.\n"
         )
     raise
+
+shutil.copy(tmp, out)
+os.remove(tmp)
 
 d = _metadata.MetadataDisplayer.with_model_file(out)
 import json

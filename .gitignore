@@ -45,3 +45,8 @@ app.*.map.json
 /android/app/profile
 /android/app/release
 tool/.venv/
+
+# Kunci penandatanganan Android — JANGAN pernah ikut ter-commit.
+android/key.properties
+**/*.jks
+**/*.keystore

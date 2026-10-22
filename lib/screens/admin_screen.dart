@@ -1,8 +1,13 @@
 import 'dart:io';
+
+import 'package:flutter/foundation.dart' show debugPrint;
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show AssetManifest, rootBundle;
 import 'package:file_picker/file_picker.dart';
 import '../models/hero_model.dart';
 import '../utils/file_helper.dart';
+import '../utils/firebase_service.dart';
+import 'test_screen.dart';
 
 class AdminScreen extends StatefulWidget {
   const AdminScreen({super.key});
@@ -12,6 +17,39 @@ class AdminScreen extends StatefulWidget {
 }
 
 class _AdminScreenState extends State<AdminScreen> {
+  /// Daftar aset yang tersedia di dalam aplikasi, dibaca dari AssetManifest.
+  /// Dipakai agar model 3D dan gambar rincian bisa DIPILIH, bukan menunggu
+  /// penyelarasan dari assets yang baru jalan saat aplikasi dibuka ulang.
+  List<String> _modelAssets = [];
+  List<String> _infoImageAssets = [];
+
+  @override
+  void initState() {
+    super.initState();
+    _loadAssetLists();
+  }
+
+  Future<void> _loadAssetLists() async {
+    try {
+      final manifest = await AssetManifest.loadFromAssetBundle(rootBundle);
+      final keys = manifest.listAssets();
+      if (!mounted) return;
+      setState(() {
+        _modelAssets = keys
+            .where((k) => k.startsWith('assets/models/') && k.endsWith('.glb'))
+            .toList()
+          ..sort();
+        _infoImageAssets = keys
+            .where((k) =>
+                k.startsWith('assets/images/') && k.contains('_info.'))
+            .toList()
+          ..sort();
+      });
+    } catch (e) {
+      debugPrint('Gagal membaca daftar aset: $e');
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -19,6 +57,43 @@ class _AdminScreenState extends State<AdminScreen> {
       appBar: AppBar(
         title: const Text('Pengaturan Hero'),
         backgroundColor: const Color(0xFF6A0DAD),
+        actions: [
+          // Status Firebase dibuat kasatmata. Jalan mundurnya ke penyimpanan
+          // lokal sengaja senyap agar aplikasi tetap jalan, tapi tanpa penanda
+          // ini tidak ada cara tahu data sedang tersimpan ke mana.
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 4),
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8),
+              alignment: Alignment.center,
+              decoration: BoxDecoration(
+                color: (FirebaseService.ready
+                        ? Colors.greenAccent
+                        : Colors.orangeAccent)
+                    .withValues(alpha: 0.18),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Text(
+                FirebaseService.ready ? 'Firebase' : 'Lokal',
+                style: TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.bold,
+                  color: FirebaseService.ready
+                      ? Colors.greenAccent
+                      : Colors.orangeAccent,
+                ),
+              ),
+            ),
+          ),
+          IconButton(
+            tooltip: 'Pengujian',
+            icon: const Icon(Icons.fact_check_outlined),
+            onPressed: () => Navigator.push(
+              context,
+              MaterialPageRoute(builder: (_) => const TestScreen()),
+            ),
+          ),
+        ],
       ),
       body: ListView.builder(
         itemCount: mockHeroes.length,
@@ -68,7 +143,14 @@ class _AdminScreenState extends State<AdminScreen> {
                   ],
                 ],
               ),
-              subtitle: Text(hero.getCoin('id'), style: const TextStyle(color: Colors.white70)),
+              // Label ikut ditampilkan: dua hero boleh bernama sama, dan
+              // label-lah satu-satunya pembedanya di daftar ini.
+              subtitle: Text(
+                hero.label.isEmpty
+                    ? hero.getCoin('id')
+                    : '${hero.getCoin('id')}  ·  ${hero.label}',
+                style: const TextStyle(color: Colors.white70),
+              ),
               trailing: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
@@ -136,10 +218,8 @@ class _AdminScreenState extends State<AdminScreen> {
 
     String currentImage = hero?.image ?? '';
     String currentAudio = hero?.audio ?? '';
-    // Model 3D tidak diunggah lewat Admin — sumbernya assets/heroes.json.
-    // Di sini hanya diteruskan apa adanya supaya tidak hilang saat diedit,
-    // dan dipakai untuk menentukan apakah pilihan tampilan relevan.
-    final String currentModel = hero?.model ?? '';
+    String currentModel = hero?.model ?? '';
+    String currentInfoImage = hero?.infoImage ?? '';
     String currentDisplayMode = hero?.displayMode ?? HeroModel.displayPanel;
 
     showModalBottomSheet(
@@ -175,7 +255,29 @@ class _AdminScreenState extends State<AdminScreen> {
                     // Pilihan tampilan saat hero terdeteksi. Hanya muncul bila
                     // hero punya model 3D — tanpa model, memilih '3D' cuma
                     // menghasilkan layar kosong.
-                    if (currentModel.isNotEmpty) ...[
+                    _buildAssetPicker(
+                      title: 'Model 3D',
+                      value: currentModel,
+                      options: _modelAssets,
+                      onChanged: (v) =>
+                          setModalState(() => currentModel = v ?? ''),
+                    ),
+                    const SizedBox(height: 10),
+                    _buildAssetPicker(
+                      title: 'Gambar rincian koin',
+                      value: currentInfoImage,
+                      options: _infoImageAssets,
+                      onChanged: (v) =>
+                          setModalState(() => currentInfoImage = v ?? ''),
+                    ),
+                    const SizedBox(height: 10),
+
+                    // Selektor SELALU tampil, termasuk saat membuat hero baru.
+                    // Dulu disembunyikan ketika model 3D belum ada — padahal
+                    // hero baru memang belum punya: modelnya menempel kemudian
+                    // dari assets begitu Label Model-nya cocok. Akibatnya
+                    // pilihan ini tidak pernah bisa diatur saat membuat hero.
+                    ...[
                       const Text('Tampilan saat terdeteksi',
                           style: TextStyle(color: Colors.white54, fontSize: 12)),
                       const SizedBox(height: 8),
@@ -200,6 +302,17 @@ class _AdminScreenState extends State<AdminScreen> {
                           ),
                         ],
                       ),
+                      if (currentModel.isEmpty) ...[
+                        const SizedBox(height: 6),
+                        const Text(
+                          'Model 3D belum menempel pada hero ini. Ia diambil '
+                          'dari assets dan dicocokkan lewat Label Model, jadi '
+                          'akan muncul setelah aplikasi dibuka ulang. Sampai '
+                          'itu terjadi, tampilannya jatuh ke keterangan saja.',
+                          style: TextStyle(
+                              color: Colors.orangeAccent, fontSize: 11),
+                        ),
+                      ],
                     ],
                     const SizedBox(height: 10),
                     
@@ -325,6 +438,7 @@ class _AdminScreenState extends State<AdminScreen> {
                             image: currentImage,
                             audio: currentAudio,
                             model: currentModel,
+                            infoImage: currentInfoImage,
                             displayMode: currentDisplayMode,
                             description: {'id': descIdCtrl.text},
                             keywords: keywordsCtrl.text.split(',').map((e) => e.trim().toUpperCase()).where((e) => e.isNotEmpty).toList(),
@@ -353,6 +467,61 @@ class _AdminScreenState extends State<AdminScreen> {
           }
         );
       },
+    );
+  }
+
+  /// Pemilih aset dari yang ter-bundle di aplikasi.
+  ///
+  /// Berupa daftar pilihan, bukan unggahan: berkas berat sengaja tetap di
+  /// dalam aplikasi demi kecepatan muat dan agar tetap jalan tanpa jaringan.
+  Widget _buildAssetPicker({
+    required String title,
+    required String value,
+    required List<String> options,
+    required ValueChanged<String?> onChanged,
+  }) {
+    // Nilai tersimpan yang tidak ada di daftar (mis. aset sudah dihapus)
+    // tetap ditawarkan, supaya tidak hilang diam-diam saat form dibuka.
+    final items = <String>{...options, if (value.isNotEmpty) value}.toList()
+      ..sort();
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(title,
+            style: const TextStyle(color: Colors.white54, fontSize: 12)),
+        const SizedBox(height: 6),
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 10),
+          decoration: BoxDecoration(
+            border: Border.all(color: Colors.white24),
+            borderRadius: BorderRadius.circular(4),
+          ),
+          child: DropdownButtonHideUnderline(
+            child: DropdownButton<String>(
+              isExpanded: true,
+              value: value.isEmpty ? null : value,
+              hint: const Text('(tidak ada)',
+                  style: TextStyle(color: Colors.white38, fontSize: 13)),
+              dropdownColor: const Color(0xFF1E293B),
+              style: const TextStyle(color: Colors.white, fontSize: 13),
+              items: [
+                const DropdownMenuItem<String>(
+                  value: null,
+                  child: Text('(tidak ada)',
+                      style: TextStyle(color: Colors.white38)),
+                ),
+                for (final a in items)
+                  DropdownMenuItem<String>(
+                    value: a,
+                    child: Text(a.split('/').last,
+                        overflow: TextOverflow.ellipsis),
+                  ),
+              ],
+              onChanged: onChanged,
+            ),
+          ),
+        ),
+      ],
     );
   }
 

@@ -3,6 +3,17 @@ plugins {
     id "kotlin-android"
     // The Flutter Gradle Plugin must be applied after the Android and Kotlin Gradle plugins.
     id "dev.flutter.flutter-gradle-plugin"
+    id "com.google.gms.google-services"
+}
+
+// Kredensial penandatanganan dibaca dari android/key.properties, berkas yang
+// TIDAK ikut ter-commit. Kalau tidak ada, build rilis tetap jalan memakai kunci
+// debug — berguna untuk mencoba build rilis di mesin yang tidak memegang kunci,
+// tapi hasilnya tidak bisa diunggah ke Play Store.
+def keystoreProperties = new Properties()
+def keystorePropertiesFile = rootProject.file('key.properties')
+if (keystorePropertiesFile.exists()) {
+    keystorePropertiesFile.withReader('UTF-8') { keystoreProperties.load(it) }
 }
 
 android {
@@ -20,18 +31,39 @@ android {
     }
 
     defaultConfig {
-        applicationId = "com.example.app_imago"
+        applicationId = "com.peruri.imago"
         minSdk = flutter.minSdkVersion
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
         versionName = flutter.versionName
     }
 
+    signingConfigs {
+        release {
+            if (keystorePropertiesFile.exists()) {
+                keyAlias = keystoreProperties['keyAlias']
+                keyPassword = keystoreProperties['keyPassword']
+                storeFile = file(keystoreProperties['storeFile'])
+                storePassword = keystoreProperties['storePassword']
+            }
+        }
+    }
+
     buildTypes {
         release {
-            // TODO: Add your own signing config for the release build.
-            // Signing with the debug keys for now, so `flutter run --release` works.
-            signingConfig = signingConfigs.debug
+            // Memakai kunci upload bila key.properties ada; kalau tidak, jatuh
+            // ke kunci debug agar build tetap bisa diuji secara lokal. Berkas
+            // yang ditandatangani kunci debug akan ditolak Play Store — itu
+            // disengaja, supaya kesalahan ketahuan saat unggah, bukan diam-diam.
+            signingConfig = keystorePropertiesFile.exists()
+                ? signingConfigs.release
+                : signingConfigs.debug
+
+            // Aturan tambahan untuk R8; lihat proguard-rules.pro.
+            proguardFiles(
+                getDefaultProguardFile('proguard-android-optimize.txt'),
+                'proguard-rules.pro',
+            )
         }
     }
 }

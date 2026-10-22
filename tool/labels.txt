@@ -1,3 +1,4 @@
 barong
-rangda
+rangda_hijau
+rangda_coklat
 background

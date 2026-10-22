@@ -65,6 +65,7 @@
     "image": "",
     "audio": "",
     "model": "assets/models/barong.glb",
+    "infoImage": "assets/images/barong_info.webp",
     "displayMode": "both",
     "description": {
       "id": "Raja roh baik dalam mitologi Bali yang digambarkan menyerupai singa. Dipercaya dihidupkan oleh Banaspatiraja dan bertugas melindungi desa dari kekuatan jahat.",
@@ -79,12 +80,28 @@
     "image": "",
     "audio": "",
     "model": "assets/models/rangda.glb",
+    "infoImage": "assets/images/rangda_hijau_info.webp",
     "displayMode": "both",
     "description": {
       "id": "Ratu iblis pemimpin para leak dan musuh abadi Barong. Dipercaya sebagai penjelmaan penyihir Calon Arang, digambarkan berambut panjang kusut dengan taring dan lidah menjulur.",
       "en": "Demon queen who leads the leak and is Barong's eternal adversary. Believed to be the incarnation of the sorceress Calon Arang, depicted with long matted hair, fangs and a protruding tongue."
     },
     "keywords": [],
-    "label": "rangda"
+    "label": "rangda_hijau"
+  },
+  {
+    "name": {"id": "Rangda", "en": "Rangda"},
+    "coin": {"id": "Mitologi Bali", "en": "Balinese Mythology"},
+    "image": "",
+    "audio": "",
+    "model": "assets/models/rangda.glb",
+    "infoImage": "assets/images/rangda_coklat_info.webp",
+    "displayMode": "both",
+    "description": {
+      "id": "Ratu iblis pemimpin para leak dan musuh abadi Barong. Dipercaya sebagai penjelmaan penyihir Calon Arang, digambarkan berambut panjang kusut dengan taring dan lidah menjulur.",
+      "en": "Demon queen who leads the leak and is Barong's eternal adversary. Believed to be the incarnation of the sorceress Calon Arang, depicted with long matted hair, fangs and a protruding tongue."
+    },
+    "keywords": [],
+    "label": "rangda_coklat"
   }
 ]

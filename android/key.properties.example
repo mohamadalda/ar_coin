@@ -1,0 +1,8 @@
+# Salin berkas ini jadi android/key.properties lalu isi sesuai keystore-mu.
+# JANGAN commit key.properties maupun berkas .jks — keduanya sudah di .gitignore.
+#
+# storeFile ditafsirkan relatif terhadap folder android/app/
+storePassword=KATA_SANDI_KEYSTORE
+keyPassword=KATA_SANDI_KUNCI
+keyAlias=upload
+storeFile=upload-keystore.jks

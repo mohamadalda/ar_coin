@@ -3,7 +3,12 @@ import 'package:translator/translator.dart';
 import '../models/hero_model.dart';
 
 class LanguageManager {
-  static final ValueNotifier<String> currentLanguage = ValueNotifier<String>('id');
+  /// Bahasa tampilan saat aplikasi dibuka.
+  ///
+  /// 'id' tetap menjadi bahasa SUMBER data hero di heroes.json — terjemahan ke
+  /// bahasa lain diturunkan darinya. Yang diubah di sini hanya bahasa yang
+  /// ditampilkan lebih dulu kepada pengguna.
+  static final ValueNotifier<String> currentLanguage = ValueNotifier<String>('en');
 
   static final List<Map<String, String>> supportedLanguages = [
     {'code': 'id', 'name': 'Indonesia'},

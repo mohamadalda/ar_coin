@@ -9,6 +9,16 @@
 # packages, and plugins designed to encourage good coding practices.
 include: package:flutter_lints/flutter.yaml
 
+analyzer:
+  exclude:
+    # Swift Package Manager meng-checkout seluruh source paket Firebase ke
+    # build/ios/SourcePackages dan build/macos/SourcePackages, lengkap dengan
+    # folder example/ milik paket-paket itu. Tiap folder tersebut punya
+    # pubspec.yaml sendiri, sehingga analyzer memperlakukannya sebagai paket
+    # terpisah dan melaporkan ratusan error dependensi yang tidak pernah
+    # di-resolve. Semuanya berkas hasil build, bukan kode project ini.
+    - build/**
+
 linter:
   # The lint rules applied to this project can be customized in the
   # section below to disable rules from the `package:flutter_lints/flutter.yaml`

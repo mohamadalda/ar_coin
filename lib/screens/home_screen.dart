@@ -27,7 +27,9 @@ class HomeScreen extends StatelessWidget {
                 shape: BoxShape.circle,
                 color: const Color(0xFF6A0DAD).withValues(alpha: 0.2),
                 boxShadow: [
-                  BoxShadow(color: const Color(0xFF6A0DAD).withValues(alpha: 0.5), blurRadius: 100),
+                  BoxShadow(
+                      color: const Color(0xFF6A0DAD).withValues(alpha: 0.5),
+                      blurRadius: 100),
                 ],
               ),
             ),
@@ -42,12 +44,14 @@ class HomeScreen extends StatelessWidget {
                 shape: BoxShape.circle,
                 color: const Color(0xFFD01B98).withValues(alpha: 0.2),
                 boxShadow: [
-                  BoxShadow(color: const Color(0xFFD01B98).withValues(alpha: 0.4), blurRadius: 80),
+                  BoxShadow(
+                      color: const Color(0xFFD01B98).withValues(alpha: 0.4),
+                      blurRadius: 80),
                 ],
               ),
             ),
           ),
-          
+
           // Top controls: Language Dropdown and Login/Logout Button
           Positioned(
             top: 40,
@@ -56,73 +60,83 @@ class HomeScreen extends StatelessWidget {
               children: [
                 // Language Dropdown
                 ValueListenableBuilder<String>(
-                  valueListenable: LanguageManager.currentLanguage,
-                  builder: (context, currentLang, _) {
-                    return Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-                      decoration: BoxDecoration(
-                        color: Colors.white.withValues(alpha: 0.1),
-                        borderRadius: BorderRadius.circular(20),
-                        border: Border.all(color: Colors.white24),
-                      ),
-                      child: DropdownButtonHideUnderline(
-                        child: DropdownButton<String>(
-                          value: currentLang,
-                          dropdownColor: const Color(0xFF1E293B),
-                          icon: const Icon(Icons.language, color: Colors.white70, size: 18),
-                          style: const TextStyle(color: Colors.white, fontSize: 13),
-                          items: LanguageManager.supportedLanguages.map((lang) {
-                            return DropdownMenuItem<String>(
-                              value: lang['code'],
-                              child: Text(lang['name']!),
-                            );
-                          }).toList(),
-                          onChanged: (newLang) {
-                            if (newLang != null) {
-                              LanguageManager.changeLanguage(newLang, context);
-                            }
-                          },
+                    valueListenable: LanguageManager.currentLanguage,
+                    builder: (context, currentLang, _) {
+                      return Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 12, vertical: 4),
+                        decoration: BoxDecoration(
+                          color: Colors.white.withValues(alpha: 0.1),
+                          borderRadius: BorderRadius.circular(20),
+                          border: Border.all(color: Colors.white24),
                         ),
-                      ),
-                    );
-                  }
-                ),
+                        child: DropdownButtonHideUnderline(
+                          child: DropdownButton<String>(
+                            value: currentLang,
+                            dropdownColor: const Color(0xFF1E293B),
+                            icon: const Icon(Icons.language,
+                                color: Colors.white70, size: 18),
+                            style: const TextStyle(
+                                color: Colors.white, fontSize: 13),
+                            items:
+                                LanguageManager.supportedLanguages.map((lang) {
+                              return DropdownMenuItem<String>(
+                                value: lang['code'],
+                                child: Text(lang['name']!),
+                              );
+                            }).toList(),
+                            onChanged: (newLang) {
+                              if (newLang != null) {
+                                LanguageManager.changeLanguage(
+                                    newLang, context);
+                              }
+                            },
+                          ),
+                        ),
+                      );
+                    }),
                 const SizedBox(width: 12),
-                
+
                 // Login/Logout Button
                 ValueListenableBuilder<bool>(
-                  valueListenable: AuthService.isLoggedIn,
-                  builder: (context, isLoggedIn, _) {
-                    return GestureDetector(
-                      onTap: () {
-                        if (isLoggedIn) {
-                          AuthService.logout();
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(content: Text('Berhasil logout')),
-                          );
-                        } else {
-                          Navigator.push(
-                            context,
-                            MaterialPageRoute(builder: (context) => const LoginScreen()),
-                          );
-                        }
-                      },
-                      child: Container(
-                        padding: const EdgeInsets.all(10),
-                        decoration: BoxDecoration(
-                          color: isLoggedIn ? Colors.red.withValues(alpha: 0.2) : Colors.white.withValues(alpha: 0.1),
-                          shape: BoxShape.circle,
-                          border: Border.all(color: isLoggedIn ? Colors.red.withValues(alpha: 0.5) : Colors.white24),
+                    valueListenable: AuthService.isLoggedIn,
+                    builder: (context, isLoggedIn, _) {
+                      return GestureDetector(
+                        onTap: () {
+                          if (isLoggedIn) {
+                            AuthService.logout();
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(content: Text('Berhasil logout')),
+                            );
+                          } else {
+                            Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                  builder: (context) => const LoginScreen()),
+                            );
+                          }
+                        },
+                        child: Container(
+                          padding: const EdgeInsets.all(10),
+                          decoration: BoxDecoration(
+                            color: isLoggedIn
+                                ? Colors.red.withValues(alpha: 0.2)
+                                : Colors.white.withValues(alpha: 0.1),
+                            shape: BoxShape.circle,
+                            border: Border.all(
+                                color: isLoggedIn
+                                    ? Colors.red.withValues(alpha: 0.5)
+                                    : Colors.white24),
+                          ),
+                          child: Icon(
+                            isLoggedIn ? Icons.logout : Icons.person,
+                            color:
+                                isLoggedIn ? Colors.redAccent : Colors.white70,
+                            size: 20,
+                          ),
                         ),
-                        child: Icon(
-                          isLoggedIn ? Icons.logout : Icons.person,
-                          color: isLoggedIn ? Colors.redAccent : Colors.white70,
-                          size: 20,
-                        ),
-                      ),
-                    );
-                  }
-                ),
+                      );
+                    }),
               ],
             ),
           ),
@@ -152,7 +166,12 @@ class HomeScreen extends StatelessWidget {
                       fontWeight: FontWeight.bold,
                       letterSpacing: 4,
                       color: Colors.white,
-                      shadows: [Shadow(color: const Color(0xFF6A0DAD).withValues(alpha: 0.5), blurRadius: 15)],
+                      shadows: [
+                        Shadow(
+                            color:
+                                const Color(0xFF6A0DAD).withValues(alpha: 0.5),
+                            blurRadius: 15)
+                      ],
                     ),
                   ),
                 ),
@@ -162,22 +181,22 @@ class HomeScreen extends StatelessWidget {
                   child: Padding(
                     padding: const EdgeInsets.symmetric(horizontal: 40.0),
                     child: ValueListenableBuilder<String>(
-                      valueListenable: LanguageManager.currentLanguage,
-                      builder: (context, lang, _) {
-                        return Text(
-                          lang == 'id' 
-                              ? "Scan fisik koin untuk melihat profil Tokoh dalam format Augmented Reality."
-                              : (lang == 'en' ? "Scan coins to view Figures profiles in Augmented Reality format."
-                              : "Scan coins to view figures in AR."), // Fallback sederhana, karena terjemahan UI statis tidak ikut API translation di mockHeroes
-                          textAlign: TextAlign.center,
-                          style: TextStyle(
-                            fontSize: 16,
-                            color: Colors.white.withValues(alpha: 0.7),
-                            height: 1.5,
-                          ),
-                        );
-                      }
-                    ),
+                        valueListenable: LanguageManager.currentLanguage,
+                        builder: (context, lang, _) {
+                          return Text(
+                            lang == 'id'
+                                ? "Scan fisik koin untuk melihat profil Tokoh dalam format Augmented Reality."
+                                : (lang == 'en'
+                                    ? "Scan coins to view Figures profiles in Augmented Reality format."
+                                    : "Scan coins to view figures in AR."), // Fallback sederhana, karena terjemahan UI statis tidak ikut API translation di mockHeroes
+                            textAlign: TextAlign.center,
+                            style: TextStyle(
+                              fontSize: 16,
+                              color: Colors.white.withValues(alpha: 0.7),
+                              height: 1.5,
+                            ),
+                          );
+                        }),
                   ),
                 ),
                 const SizedBox(height: 60),
@@ -187,11 +206,13 @@ class HomeScreen extends StatelessWidget {
                     onTap: () {
                       Navigator.push(
                         context,
-                        MaterialPageRoute(builder: (context) => const ARScannerScreen()),
+                        MaterialPageRoute(
+                            builder: (context) => const ARScannerScreen()),
                       );
                     },
                     child: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 40, vertical: 16),
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 40, vertical: 16),
                       decoration: BoxDecoration(
                         gradient: const LinearGradient(
                           colors: [Color(0xFF6A0DAD), Color(0xFFD01B98)],
@@ -199,7 +220,8 @@ class HomeScreen extends StatelessWidget {
                         borderRadius: BorderRadius.circular(30),
                         boxShadow: [
                           BoxShadow(
-                            color: const Color(0xFF6A0DAD).withValues(alpha: 0.4),
+                            color:
+                                const Color(0xFF6A0DAD).withValues(alpha: 0.4),
                             blurRadius: 20,
                             offset: const Offset(0, 10),
                           ),
@@ -208,10 +230,11 @@ class HomeScreen extends StatelessWidget {
                       child: const Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          Icon(Icons.camera_alt_rounded, color: Colors.white, size: 28),
+                          Icon(Icons.camera_alt_rounded,
+                              color: Colors.white, size: 28),
                           SizedBox(width: 12),
                           Text(
-                            "MULAI SCAN",
+                            "START SCAN",
                             style: TextStyle(
                               fontSize: 18,
                               fontWeight: FontWeight.bold,
@@ -227,47 +250,49 @@ class HomeScreen extends StatelessWidget {
                 const SizedBox(height: 20),
                 // Settings Button (Admin Only)
                 ValueListenableBuilder<bool>(
-                  valueListenable: AuthService.isLoggedIn,
-                  builder: (context, isLoggedIn, _) {
-                    if (!isLoggedIn) return const SizedBox.shrink();
-                    
-                    return FadeInUp(
-                      delay: const Duration(milliseconds: 700),
-                      child: GestureDetector(
-                        onTap: () {
-                          Navigator.push(
-                            context,
-                            MaterialPageRoute(builder: (context) => const AdminScreen()),
-                          );
-                        },
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-                          decoration: BoxDecoration(
-                            color: Colors.white.withValues(alpha: 0.1),
-                            borderRadius: BorderRadius.circular(20),
-                            border: Border.all(color: Colors.white24),
-                          ),
-                          child: const Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Icon(Icons.settings, color: Colors.white70, size: 20),
-                              SizedBox(width: 10),
-                              Text(
-                                "PENGATURAN HERO",
-                                style: TextStyle(
-                                  fontSize: 14,
-                                  fontWeight: FontWeight.w600,
-                                  letterSpacing: 1.0,
-                                  color: Colors.white70,
+                    valueListenable: AuthService.isLoggedIn,
+                    builder: (context, isLoggedIn, _) {
+                      if (!isLoggedIn) return const SizedBox.shrink();
+
+                      return FadeInUp(
+                        delay: const Duration(milliseconds: 700),
+                        child: GestureDetector(
+                          onTap: () {
+                            Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                  builder: (context) => const AdminScreen()),
+                            );
+                          },
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 24, vertical: 12),
+                            decoration: BoxDecoration(
+                              color: Colors.white.withValues(alpha: 0.1),
+                              borderRadius: BorderRadius.circular(20),
+                              border: Border.all(color: Colors.white24),
+                            ),
+                            child: const Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(Icons.settings,
+                                    color: Colors.white70, size: 20),
+                                SizedBox(width: 10),
+                                Text(
+                                  "PENGATURAN HERO",
+                                  style: TextStyle(
+                                    fontSize: 14,
+                                    fontWeight: FontWeight.w600,
+                                    letterSpacing: 1.0,
+                                    color: Colors.white70,
+                                  ),
                                 ),
-                              ),
-                            ],
+                              ],
+                            ),
                           ),
                         ),
-                      ),
-                    );
-                  }
-                ),
+                      );
+                    }),
               ],
             ),
           ),
@@ -276,4 +301,3 @@ class HomeScreen extends StatelessWidget {
     );
   }
 }
-
