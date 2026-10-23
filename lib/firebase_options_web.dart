@@ -22,15 +22,23 @@ import 'package:firebase_core/firebase_core.dart';
 ///
 /// Selama masih null, [FirebaseService] akan berjalan dengan `ready == false`
 /// dan seluruh data jatuh ke penyimpanan lokal — aplikasi tetap berfungsi.
-const FirebaseOptions? kWebFirebaseOptions = null;
-
-// Contoh bentuk isiannya:
-//
-// const FirebaseOptions? kWebFirebaseOptions = FirebaseOptions(
-//   apiKey: '...',
-//   appId: '1:1008830387025:web:...',
-//   messagingSenderId: '1008830387025',
-//   projectId: 'imago-3137c',
-//   authDomain: 'imago-3137c.firebaseapp.com',
-//   storageBucket: 'imago-3137c.firebasestorage.app',
-// );
+///
+/// `apiKey` di bawah BUKAN rahasia. Konfigurasi Firebase untuk web memang
+/// dirancang untuk ikut terkirim ke setiap browser, dan tidak bisa
+/// disembunyikan di aplikasi sisi klien. Yang menjaga data tetap aman adalah
+/// Firestore Security Rules dan daftar Authorized domains di Authentication,
+/// bukan kerahasiaan nilai ini.
+// Tipenya SENGAJA nullable meski sekarang terisi: nilai null adalah jalur
+// "belum dikonfigurasi" yang dibaca FirebaseService, dan jalur itu harus tetap
+// hidup supaya siapa pun yang meng-clone repo ini tanpa project Firebase
+// sendiri tetap bisa menjalankan aplikasinya dengan penyimpanan lokal.
+// ignore: unnecessary_nullable_for_final_variable_declarations
+const FirebaseOptions? kWebFirebaseOptions = FirebaseOptions(
+  apiKey: 'AIzaSyB6a_mdwET2gNchjdZrd-LjxQtv6KObKug',
+  appId: '1:1008830387025:web:0c90897d3c938686393970',
+  messagingSenderId: '1008830387025',
+  projectId: 'imago-3137c',
+  authDomain: 'imago-3137c.firebaseapp.com',
+  storageBucket: 'imago-3137c.firebasestorage.app',
+  measurementId: 'G-E6Y8E8HBCE',
+);
