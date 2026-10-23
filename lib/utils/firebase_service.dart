@@ -1,5 +1,6 @@
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/foundation.dart';
+import '../firebase_options_web.dart';
 
 /// Penyambung ke Firebase yang BOLEH gagal.
 ///
@@ -10,17 +11,39 @@ import 'package:flutter/foundation.dart';
 /// false dan seluruh fitur jatuh kembali ke penyimpanan lokal.
 class FirebaseService {
   static bool _ready = false;
+  static String? _lastError;
 
   /// True hanya bila Firebase benar-benar siap dipakai.
   static bool get ready => _ready;
 
+  /// Alasan Firebase tidak aktif, untuk ditampilkan di strip diagnostik.
+  /// Null bila [ready] true.
+  static String? get lastError => _lastError;
+
   static Future<void> init() async {
     try {
-      await Firebase.initializeApp();
+      if (kIsWeb) {
+        // Web tidak punya google-services.json yang ikut ter-bundle, jadi
+        // opsinya harus ditanam di kode. Lihat lib/firebase_options_web.dart.
+        if (kWebFirebaseOptions == null) {
+          _ready = false;
+          _lastError = 'Web app belum didaftarkan di Firebase Console '
+              '(lihat lib/firebase_options_web.dart)';
+          debugPrint('Firebase tidak aktif di web: $_lastError');
+          return;
+        }
+        await Firebase.initializeApp(options: kWebFirebaseOptions);
+      } else {
+        // Jalur mobile TIDAK BERUBAH: konfigurasi dibaca dari
+        // google-services.json / GoogleService-Info.plist seperti semula.
+        await Firebase.initializeApp();
+      }
       _ready = true;
+      _lastError = null;
       debugPrint('✅ Firebase siap');
     } catch (e) {
       _ready = false;
+      _lastError = '$e';
       debugPrint('ℹ️ Firebase tidak aktif, memakai penyimpanan lokal: $e');
     }
   }
