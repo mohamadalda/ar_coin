@@ -2,6 +2,7 @@
 
 import 'dart:io';
 
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show AssetManifest, rootBundle;
 import 'package:file_picker/file_picker.dart';
@@ -328,7 +329,14 @@ class _AdminScreenState extends State<AdminScreen> {
                           ),
                         ),
                         ElevatedButton.icon(
-                          onPressed: () async {
+                          // Di web, PlatformFile.path SELALU null: berkasnya hidup
+                          // di memori browser, bukan di sistem berkas. Menyimpannya
+                          // butuh penyimpanan sisi browser (IndexedDB) yang belum ada,
+                          // jadi tombolnya dimatikan dengan alasan yang terbaca
+                          // daripada dibiarkan menelan klik tanpa akibat apa pun.
+                          onPressed: kIsWeb
+                              ? null
+                              : () async {
                             final result = await FilePicker.pickFile(type: FileType.image);
                             if (result?.path != null) {
                               final path = await FileHelper.saveFileLocally(File(result!.path!), 'img');
@@ -377,7 +385,14 @@ class _AdminScreenState extends State<AdminScreen> {
                           ),
                         ),
                         ElevatedButton.icon(
-                          onPressed: () async {
+                          // Di web, PlatformFile.path SELALU null: berkasnya hidup
+                          // di memori browser, bukan di sistem berkas. Menyimpannya
+                          // butuh penyimpanan sisi browser (IndexedDB) yang belum ada,
+                          // jadi tombolnya dimatikan dengan alasan yang terbaca
+                          // daripada dibiarkan menelan klik tanpa akibat apa pun.
+                          onPressed: kIsWeb
+                              ? null
+                              : () async {
                             final result = await FilePicker.pickFile(type: FileType.audio);
                             if (result?.path != null) {
                               final path = await FileHelper.saveFileLocally(File(result!.path!), 'aud');

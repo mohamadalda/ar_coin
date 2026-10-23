@@ -59,6 +59,10 @@ dependencies:
   cloud_firestore: ^7.0.0
   firebase_auth: ^7.0.0
   path: ^1.9.1
+  # Sudah ada sebagai dependensi transitif; dideklarasikan eksplisit karena
+  # lib/platform/web_download_web.dart mengimpornya langsung. Hanya terpakai
+  # di target web — berkas itu tidak pernah dikompilasi di mobile.
+  web: ^1.1.1
 
 dev_dependencies:
   flutter_test:
