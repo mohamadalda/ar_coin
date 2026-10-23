@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:math';
 import 'dart:math' as math;
 import 'dart:io';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:camera/camera.dart';
 import 'package:google_mlkit_object_detection/google_mlkit_object_detection.dart';
@@ -16,6 +17,7 @@ import '../models/hero_model.dart';
 import '../models/test_record.dart';
 import '../utils/file_helper.dart';
 import '../utils/language_manager.dart';
+import '../platform/web_camera.dart';
 
 class ARScannerScreen extends StatefulWidget {
   const ARScannerScreen({super.key, this.testExpected});
@@ -33,6 +35,18 @@ class _ARScannerScreenState extends State<ARScannerScreen>
     with TickerProviderStateMixin {
   CameraController? _controller;
   bool _isCameraInitialized = false;
+
+  /// Nama kesalahan getUserMedia bila kamera web gagal menyala, untuk
+  /// ditampilkan ke pengguna alih-alih layar hitam tanpa penjelasan.
+  String? _webCameraError;
+
+  /// True bila ada preview kamera hidup untuk dilukisi di atasnya.
+  ///
+  /// Saat false seluruh hiasan AR disembunyikan: tanpa ini, scanline dan
+  /// cincin bidik tetap berputar di atas pesan kesalahan dan menimpa teksnya.
+  bool get _hasLivePreview => kIsWeb
+      ? _isCameraInitialized
+      : (_isCameraInitialized && _controller != null);
   bool _showResult = false;
 
   /// Di mode 3D, menekan tombol bernama menukar tampilan dari aset 3D ke
@@ -301,6 +315,22 @@ class _ARScannerScreenState extends State<ARScannerScreen>
   }
 
   Future<void> _requestPermissionAndInitCamera() async {
+    // Di web, getUserMedia ITU SENDIRI yang menjadi prompt izinnya.
+    // permission_handler tidak punya implementasi web dan SELALU menjawab
+    // denied, jadi memanggilnya di sini membuat kamera tidak pernah menyala.
+    if (kIsWeb) {
+      final r = await startWebCamera();
+      if (!mounted) return;
+      setState(() {
+        _isCameraInitialized = r.ok;
+        _webCameraError = r.ok ? null : r.error;
+      });
+      debugPrint(r.ok
+          ? 'Kamera web siap: ${r.width}x${r.height}'
+          : 'Kamera web gagal: ${r.error}');
+      return;
+    }
+
     final status = await Permission.camera.request();
     if (status.isGranted) {
       _initCamera();
@@ -661,6 +691,9 @@ class _ARScannerScreenState extends State<ARScannerScreen>
     _audioPlayer.dispose();
     _controller?.stopImageStream();
     _controller?.dispose();
+    // Tab yang masih memegang track kamera terus menyalakan indikator rekaman
+    // di browser, jadi ini wajib.
+    if (kIsWeb) stopWebCamera();
     _pulseController.dispose();
     _rotateController.dispose();
     _lockController.dispose();
@@ -728,19 +761,31 @@ class _ARScannerScreenState extends State<ARScannerScreen>
     final assetPx = _showInfoImage ? infoPx : modelPx;
 
     return Scaffold(
-      backgroundColor: Colors.black,
+      // Di web kanvas Flutter harus tembus pandang: lapisan kameranya adalah
+      // elemen <video> DOM yang duduk di BELAKANG kanvas (lihat web/index.html).
+      backgroundColor: kIsWeb ? Colors.transparent : Colors.black,
       body: Stack(
         fit: StackFit.expand,
         children: [
           // LAYER 1: Camera
-          if (_isCameraInitialized && _controller != null)
+          if (kIsWeb)
+            // Tidak ada yang perlu dilukis saat kamera jalan — justru harus
+            // dibiarkan kosong agar videonya terlihat menembus kanvas.
+            if (_isCameraInitialized)
+              const SizedBox.expand()
+            else if (_webCameraError != null)
+              _buildWebCameraNotice()
+            else
+              const Center(
+                  child: CircularProgressIndicator(color: Color(0xFF6A0DAD)))
+          else if (_isCameraInitialized && _controller != null)
             _buildCamera()
           else
             const Center(
                 child: CircularProgressIndicator(color: Color(0xFF6A0DAD))),
 
           // LAYER 1.5: Sapuan scanline, hanya saat masih mencari
-          if (!_showResult)
+          if (!_showResult && _hasLivePreview)
             IgnorePointer(
               child: RepaintBoundary(
                 child: AnimatedBuilder(
@@ -755,7 +800,8 @@ class _ARScannerScreenState extends State<ARScannerScreen>
             ),
 
           // LAYER 2: Cincin bidik, menempel pada koin yang terlacak
-          AnimatedPositioned(
+          if (_hasLivePreview)
+            AnimatedPositioned(
             duration: const Duration(milliseconds: 260),
             curve: Curves.easeOut,
             left: anchor.dx - 100,
@@ -971,6 +1017,44 @@ class _ARScannerScreenState extends State<ARScannerScreen>
             ],
           ),
         ],
+      ),
+    );
+  }
+
+  /// Penjelasan saat kamera web gagal menyala.
+  ///
+  /// Tanpa ini pengguna hanya melihat layar hitam, dan penyebab paling sering
+  /// — halaman dibuka lewat http biasa, bukan https — tidak terlihat sama
+  /// sekali dari layar. getUserMedia hanya tersedia di konteks aman.
+  Widget _buildWebCameraNotice() {
+    const style = TextStyle(color: Colors.white70, fontSize: 13, height: 1.5);
+    // Teks sengaja berbahasa Inggris, mengikuti chrome UI lain di aplikasi ini
+    // ("START SCAN", "Scanning...") yang juga ditulis langsung dalam Inggris.
+    final message = switch (_webCameraError) {
+      'NotAllowedError' =>
+        'Camera permission was denied. Allow it from the camera icon in the '
+            'address bar, then reload the page.',
+      'NotFoundError' => 'No camera was found on this device.',
+      'NotReadableError' =>
+        'The camera is in use by another app. Close it and try again.',
+      'InsecureContextOrUnsupported' =>
+        'The camera is only available over HTTPS. Open this page with https:// '
+            'or via localhost.',
+      _ => 'The camera could not be started ($_webCameraError).',
+    };
+
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 32),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(Icons.videocam_off_outlined,
+                color: Colors.white38, size: 44),
+            const SizedBox(height: 16),
+            Text(message, textAlign: TextAlign.center, style: style),
+          ],
+        ),
       ),
     );
   }
