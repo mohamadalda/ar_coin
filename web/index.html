@@ -59,18 +59,55 @@
       display: none;
     }
 
-    /* Kanvas Flutter duduk di atas lapisan kamera. */
-    flutter-view, flt-glass-pane {
-      position: relative;
+    /*
+      Aset 3D. Elemen DOM biasa, BUKAN platform view, dengan alasan yang sama
+      dengan lapisan kamera. Posisinya ditulis dari Dart memakai nilai anchor
+      yang sama dengan yang memposisikan panel keterangan, sehingga keduanya
+      tidak mungkin berbeda tempat.
+    */
+    #imago-model {
+      position: fixed;
       z-index: 1;
+      background-color: transparent;
+      visibility: hidden;
+      --progress-bar-color: transparent;
+    }
+
+    /*
+      Bilah progres bawaan model-viewer digambar selebar penuh di tepi atas
+      elemennya, dan tampak sebagai garis panjang melintang di atas aset.
+    */
+    #imago-model::part(default-progress-bar) {
+      display: none !important;
+    }
+
+    /*
+      Kanvas Flutter melukis HUD di atas kedua lapisan DOM di atas.
+
+      HANYA z-index. Jangan sentuh `position`: Flutter menulis
+      `position: absolute; inset: 0` sendiri sebagai gaya inline, dan
+      menimpanya di sini berarti berebut layout dengan engine-nya.
+    */
+    flutter-view {
+      z-index: 2;
     }
   </style>
 </head>
 <body>
   <video id="imago-camera" playsinline muted autoplay></video>
 
+  <!--
+    Pustaka model-viewer. model_viewer_plus justru MENGHAPUS tag ini dari
+    templatnya di web, jadi ia harus dimuat sendiri — tanpa ini elemen
+    <model-viewer> tetap elemen tak dikenal dan hanya tampil sebagai kotak
+    kosong, tanpa pesan kesalahan apa pun.
+  -->
+  <script type="module"
+          src="https://cdn.jsdelivr.net/npm/@google/model-viewer@4.0.0/dist/model-viewer.min.js"></script>
+
   <script src="imago_camera.js"></script>
   <script src="imago_detector.js"></script>
+  <script src="imago_model.js"></script>
   <script src="flutter_bootstrap.js" async></script>
 </body>
 </html>

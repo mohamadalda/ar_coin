@@ -19,6 +19,7 @@ import '../utils/file_helper.dart';
 import '../utils/language_manager.dart';
 import '../platform/web_camera.dart';
 import '../platform/web_detector.dart';
+import '../platform/web_model.dart';
 
 class ARScannerScreen extends StatefulWidget {
   const ARScannerScreen({super.key, this.testExpected});
@@ -49,6 +50,13 @@ class _ARScannerScreenState extends State<ARScannerScreen>
 
   /// Alasan detektor web tidak aktif, bila gagal dimuat.
   String? _webDetectorError;
+
+  /// Nilai terakhir yang dikirim ke elemen <model-viewer> DOM. build() berjalan
+  /// jauh lebih sering daripada nilai-nilai ini berubah, jadi pengirimannya
+  /// dijaga agar tidak menyentuh DOM tanpa perlu.
+  String? _webModelSrc;
+  Rect? _webModelRect;
+  bool? _webModelVisible;
 
   /// True bila ada preview kamera hidup untuk dilukisi di atasnya.
   ///
@@ -265,8 +273,19 @@ class _ARScannerScreenState extends State<ARScannerScreen>
         _reportTest(detectedLabel: '', detectedName: '', confidence: 0);
       });
     }
+    if (kIsWeb) {
+      // Pengganti kanal JavascriptChannel 'ModelReady' yang diabaikan paket
+      // model_viewer_plus di web. Tombol info menunggu sinyal ini, bukan
+      // mendahuluinya.
+      onWebModelReady((ms) {
+        debugPrint('Model 3D siap dalam $ms ms');
+        if (mounted && !_modelReady) setState(() => _modelReady = true);
+      });
+    }
     _requestPermissionAndInitCamera();
-    _initObjectDetector();
+    // ML Kit tidak ada di web; di sana pengenalan ditangani detektor MediaPipe
+    // yang dinyalakan setelah kamera siap.
+    if (!kIsWeb) _initObjectDetector();
 
     _pulseController = AnimationController(
       duration: const Duration(milliseconds: 1500),
@@ -814,12 +833,61 @@ class _ARScannerScreenState extends State<ARScannerScreen>
   }
 
   void _pushSizeToModel() {
-    final controller = _modelWebView;
     final px = _targetModelHeightPx();
-    if (controller == null || px == null) return;
+    if (px == null) return;
+
+    // Di web kalibrasinya hidup di imago_model.js, bukan di dalam WebView.
+    if (kIsWeb) {
+      setWebModelSize(px);
+      return;
+    }
+
+    final controller = _modelWebView;
+    if (controller == null) return;
     controller.runJavaScript(
       'window.setSize && window.setSize(${px.toStringAsFixed(1)});',
     );
+  }
+
+  /// Menyelaraskan elemen <model-viewer> DOM dengan keadaan layar.
+  ///
+  /// Dipanggil dari build() karena di situlah anchor dan ukuran diketahui, dan
+  /// memakai nilai yang SAMA PERSIS dengan yang memposisikan panel keterangan
+  /// — sehingga aset dan panel tidak mungkin berbeda tempat.
+  void _syncWebModel({
+    required String? src,
+    required Rect rect,
+    required bool visible,
+  }) {
+    if (src == null) {
+      if (_webModelVisible != false) {
+        _webModelVisible = false;
+        setWebModelVisible(false);
+      }
+      return;
+    }
+
+    if (_webModelSrc != src) {
+      _webModelSrc = src;
+      // Aset bawaan disajikan di bawah assets/, dan deklarasinya sendiri sudah
+      // berawalan assets/, sehingga jalurnya menjadi assets/assets/.
+      final changed = setWebModelSrc('assets/$src');
+      if (changed && _modelReady) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) setState(() => _modelReady = false);
+        });
+      }
+    }
+
+    if (_webModelRect != rect) {
+      _webModelRect = rect;
+      setWebModelRect(rect);
+    }
+
+    if (_webModelVisible != visible) {
+      _webModelVisible = visible;
+      setWebModelVisible(visible);
+    }
   }
 
   @override
@@ -893,6 +961,24 @@ class _ARScannerScreenState extends State<ARScannerScreen>
     // dan kesamaan ukurannya dengan koin fisik hilang. Kalau koin sangat dekat
     // gambarnya boleh terpotong tepi layar — sama seperti kartu keterangan.
     final infoPx = (_coinHeightOnScreen() ?? 120.0) * _kInfoImageVsCoin;
+
+    // Elemen <model-viewer> DOM diselaraskan di sini, dengan anchor dan ukuran
+    // yang sama dengan yang dipakai widget-widget di bawah.
+    if (kIsWeb) {
+      _syncWebModel(
+        src: warmModel,
+        rect: Rect.fromLTWH(
+          anchor.dx - modelSide / 2,
+          anchor.dy - modelSide / 2,
+          modelSide,
+          modelSide,
+        ),
+        // Dipasang sejak layar dibuka dan tidak pernah dibongkar: membongkarnya
+        // berarti mesin render 3D dan berkas GLB harus diunduh ulang dari nol
+        // setiap kali koin terdeteksi.
+        visible: show3d,
+      );
+    }
 
     // Tombol pengalih tampil di KEDUA keadaan, jadi pengguna selalu punya
     // jalan bolak-balik antara aset 3D dan gambar rincian.
@@ -992,7 +1078,8 @@ class _ARScannerScreenState extends State<ARScannerScreen>
           // disembunyikan. Membongkarnya berarti WebView, mesin render 3D
           // (956 KB) dan berkas GLB (882 KB) harus dimuat ulang dari nol setiap
           // kali koin terdeteksi — itulah penyebab aset lama keluarnya.
-          if (warmModel != null)
+          // Di web asetnya elemen DOM, bukan widget — lihat _syncWebModel().
+          if (warmModel != null && !kIsWeb)
             AnimatedPositioned(
               // Dipersingkat dari 260 ms: dengan easing panjang, model berenang
               // menyusul koin seperempat detik kemudian alih-alih menempel.
