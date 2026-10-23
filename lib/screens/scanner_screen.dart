@@ -649,11 +649,16 @@ class _ARScannerScreenState extends State<ARScannerScreen>
     final hero =
         o.label.isEmpty ? null : _matchCoinByLabel(o.label, o.confidence);
 
-    // Kotak hanya diteruskan saat ada kecocokan, persis seperti mobile: di
-    // sana `rect` memang baru diisi ketika sebuah label cocok. Frame yang
-    // meleset sengaja membiarkan kotak terakhir apa adanya.
+    // Kotak hanya diteruskan saat ada kecocokan DAN koinnya benar-benar
+    // ditemukan pencocokan bentuk. Tanpa syarat kedua, yang terkirim adalah
+    // daerah pencarian — ukurannya tetap, sehingga aset berhenti mengikuti
+    // ukuran koin dan hanya menempel di cincin bidik.
+    //
+    // Frame yang meleset sengaja membiarkan kotak terakhir apa adanya, persis
+    // seperti mobile: mengosongkannya membuat anchor jatuh ke tengah layar dan
+    // aset terlihat melompat.
     _applyDetection(
-      rect: hero != null ? o.box : null,
+      rect: (hero != null && o.located) ? o.box : null,
       hero: hero,
       sawAnyObject: o.sawAnyObject,
     );

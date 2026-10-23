@@ -36,6 +36,7 @@ extension type _JsObservation._(JSObject _) implements JSObject {
   external double get y;
   external double get w;
   external double get h;
+  external bool get located;
   external double get srcW;
   external double get srcH;
   external bool get sawAnyObject;
@@ -64,6 +65,7 @@ void onWebDetectorResult(void Function(CoinObservation) cb) {
       label: r.label,
       confidence: r.confidence,
       box: r.w > 0 && r.h > 0 ? Rect.fromLTWH(r.x, r.y, r.w, r.h) : null,
+      located: r.located,
       sourceSize: Size(r.srcW, r.srcH),
       sawAnyObject: r.sawAnyObject,
       latencyMs: r.tMs,

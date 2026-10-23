@@ -18,6 +18,11 @@ class CoinObservation {
   /// menghasilkan apa pun.
   final Rect? box;
 
+  /// True bila [box] adalah koin yang benar-benar ditemukan pencocokan bentuk.
+  /// False berarti ia sekadar daerah pencarian, dan posisi aset sebaiknya
+  /// tidak diperbarui darinya.
+  final bool located;
+
   /// Ukuran sumber tempat [box] dinyatakan.
   final Size sourceSize;
 
@@ -32,6 +37,7 @@ class CoinObservation {
     required this.label,
     required this.confidence,
     required this.box,
+    required this.located,
     required this.sourceSize,
     required this.sawAnyObject,
     required this.latencyMs,
