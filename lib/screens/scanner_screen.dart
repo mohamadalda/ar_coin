@@ -18,6 +18,7 @@ import '../models/test_record.dart';
 import '../utils/file_helper.dart';
 import '../utils/language_manager.dart';
 import '../platform/web_camera.dart';
+import '../platform/web_detector.dart';
 
 class ARScannerScreen extends StatefulWidget {
   const ARScannerScreen({super.key, this.testExpected});
@@ -39,6 +40,15 @@ class _ARScannerScreenState extends State<ARScannerScreen>
   /// Nama kesalahan getUserMedia bila kamera web gagal menyala, untuk
   /// ditampilkan ke pengguna alih-alih layar hitam tanpa penjelasan.
   String? _webCameraError;
+
+  /// Ukuran sumber video di web, dipakai untuk menghitung ROI detektor.
+  Size? _webSourceSize;
+
+  /// ROI terakhir yang dikirim ke detektor, agar tidak dikirim ulang tiap build.
+  Rect? _lastPushedRoi;
+
+  /// Alasan detektor web tidak aktif, bila gagal dimuat.
+  String? _webDetectorError;
 
   /// True bila ada preview kamera hidup untuk dilukisi di atasnya.
   ///
@@ -328,6 +338,10 @@ class _ARScannerScreenState extends State<ARScannerScreen>
       debugPrint(r.ok
           ? 'Kamera web siap: ${r.width}x${r.height}'
           : 'Kamera web gagal: ${r.error}');
+      if (r.ok) {
+        await _startWebDetection(
+            Size(r.width.toDouble(), r.height.toDouble()));
+      }
       return;
     }
 
@@ -466,89 +480,203 @@ class _ARScannerScreenState extends State<ARScannerScreen>
         hero = _matchCoinByText(recognizedText.text);
       }
 
-      if (mounted) {
-        // Posisi diperbarui walau hero-nya sama, supaya aset 3D terus mengikuti.
-        // Frame yang meleset (model mengembalikan 'background') SENGAJA tidak
-        // menghapus kotak terakhir: mengosongkannya membuat anchor jatuh ke
-        // tengah layar, dan aset terlihat melompat bolak-balik.
-        if (rect != null) {
-          // Dihaluskan di sumbernya, bukan lewat animasi widget yang panjang:
-          // kotak dari detektor berderak antar-frame, tapi animasi widget
-          // membuat model tertinggal di belakang koin.
-          final prev = _trackedRect;
-          final smoothed = prev == null
-              ? rect
-              : Rect.fromLTRB(
-                  prev.left + (rect.left - prev.left) * 0.5,
-                  prev.top + (rect.top - prev.top) * 0.5,
-                  prev.right + (rect.right - prev.right) * 0.5,
-                  prev.bottom + (rect.bottom - prev.bottom) * 0.5,
-                );
-          if (smoothed != _trackedRect) {
-            setState(() => _trackedRect = smoothed);
-            // Ukuran koin berubah -> jarak kamera 3D ikut disesuaikan.
-            _pushSizeToModel();
-          }
-        }
-
-        if (hero != null) {
-          _missingFrames = 0;
-          // Dibandingkan lewat label, bukan nama: dua varian koin bisa
-          // bernama sama persis, dan perbandingan berbasis nama membuat
-          // pergantian antar-varian tidak pernah terdeteksi sebagai hero baru.
-          if (_scannedHero == null || _scannedHero!.label != hero.label) {
-            setState(() {
-              _scannedHero = hero;
-              _showResult = true;
-            });
-            // Mode uji selesai pada deteksi PERTAMA: yang diukur adalah
-            // kemampuan mengenali, bukan apa yang terjadi sesudahnya.
-            if (widget.testExpected != null) {
-              _reportTest(
-                detectedLabel: hero.label,
-                detectedName: hero.getName('id'),
-                confidence: _lastMatchConfidence,
-              );
-              return;
-            }
-
-            _lockController.forward(from: 0);
-            _revealController.forward(from: 0);
-            if (mounted) {
-              debugPrint(
-                  '✅ Image match (Skenario 1): ${hero.getName(LanguageManager.currentLanguage.value)}');
-              _playHeroAudio(hero);
-            }
-          }
-        } else {
-          _missingFrames++;
-          // Koin sudah lama tidak terlihat: seluruh overlay dilepas, bukan
-          // hanya aset 3D. Menyisakan kartu keterangan yang mengambang tanpa
-          // objek yang dijelaskannya tidak masuk akal di tampilan AR.
-          final limit = sawAnyObject
-              ? _kFramesBeforeDropUnmatched
-              : _kFramesBeforeDropNoObject;
-          if (_missingFrames >= limit && _showResult) {
-            debugPrint('👋 Objek hilang, overlay dilepas');
-            if (_isPlayingAudio) {
-              await _audioPlayer.stop();
-            }
-            setState(() {
-              _trackedRect = null;
-              _showResult = false;
-              _scannedHero = null;
-              _isPlayingAudio = false;
-              _panelDragDelta = Offset.zero;
-              _showInfoImage = false;
-            });
-          }
-        }
-      }
+      await _applyDetection(
+        rect: rect,
+        hero: hero,
+        sawAnyObject: sawAnyObject,
+      );
     } catch (e) {
       debugPrint("❌ Detection Error: $e");
     } finally {
       _isBusy = false;
     }
+  }
+
+  /// Menerapkan satu hasil deteksi ke keadaan layar.
+  ///
+  /// Dipakai BERSAMA oleh kedua platform: di mobile dipanggil dari
+  /// _processCameraImage dengan keluaran ML Kit, di web dari aliran
+  /// CoinObservation. Seluruh perilaku pelacakan — penghalusan di sumber,
+  /// penghitungan frame hilang, dan pelepasan overlay — hidup di sini supaya
+  /// tidak ada dua salinan yang bisa menyimpang satu sama lain.
+  Future<void> _applyDetection({
+    required Rect? rect,
+    required HeroModel? hero,
+    required bool sawAnyObject,
+  }) async {
+    if (!mounted) return;
+    // Posisi diperbarui walau hero-nya sama, supaya aset 3D terus mengikuti.
+    // Frame yang meleset (model mengembalikan 'background') SENGAJA tidak
+    // menghapus kotak terakhir: mengosongkannya membuat anchor jatuh ke
+    // tengah layar, dan aset terlihat melompat bolak-balik.
+    if (rect != null) {
+      // Dihaluskan di sumbernya, bukan lewat animasi widget yang panjang:
+      // kotak dari detektor berderak antar-frame, tapi animasi widget
+      // membuat model tertinggal di belakang koin.
+      final prev = _trackedRect;
+      final smoothed = prev == null
+          ? rect
+          : Rect.fromLTRB(
+              prev.left + (rect.left - prev.left) * 0.5,
+              prev.top + (rect.top - prev.top) * 0.5,
+              prev.right + (rect.right - prev.right) * 0.5,
+              prev.bottom + (rect.bottom - prev.bottom) * 0.5,
+            );
+      if (smoothed != _trackedRect) {
+        setState(() => _trackedRect = smoothed);
+        // Ukuran koin berubah -> jarak kamera 3D ikut disesuaikan.
+        _pushSizeToModel();
+      }
+    }
+
+    if (hero != null) {
+      _missingFrames = 0;
+      // Dibandingkan lewat label, bukan nama: dua varian koin bisa
+      // bernama sama persis, dan perbandingan berbasis nama membuat
+      // pergantian antar-varian tidak pernah terdeteksi sebagai hero baru.
+      if (_scannedHero == null || _scannedHero!.label != hero.label) {
+        setState(() {
+          _scannedHero = hero;
+          _showResult = true;
+        });
+        // Mode uji selesai pada deteksi PERTAMA: yang diukur adalah
+        // kemampuan mengenali, bukan apa yang terjadi sesudahnya.
+        if (widget.testExpected != null) {
+          _reportTest(
+            detectedLabel: hero.label,
+            detectedName: hero.getName('id'),
+            confidence: _lastMatchConfidence,
+          );
+          return;
+        }
+
+        _lockController.forward(from: 0);
+        _revealController.forward(from: 0);
+        if (mounted) {
+          debugPrint(
+              '✅ Image match (Skenario 1): ${hero.getName(LanguageManager.currentLanguage.value)}');
+          _playHeroAudio(hero);
+        }
+      }
+    } else {
+      _missingFrames++;
+      // Koin sudah lama tidak terlihat: seluruh overlay dilepas, bukan
+      // hanya aset 3D. Menyisakan kartu keterangan yang mengambang tanpa
+      // objek yang dijelaskannya tidak masuk akal di tampilan AR.
+      final limit = sawAnyObject
+          ? _kFramesBeforeDropUnmatched
+          : _kFramesBeforeDropNoObject;
+      if (_missingFrames >= limit && _showResult) {
+        debugPrint('👋 Objek hilang, overlay dilepas');
+        if (_isPlayingAudio) {
+          await _audioPlayer.stop();
+        }
+        setState(() {
+          _trackedRect = null;
+          _showResult = false;
+          _scannedHero = null;
+          _isPlayingAudio = false;
+          _panelDragDelta = Offset.zero;
+          _showInfoImage = false;
+        });
+      }
+    }
+  }
+
+  // ===== JALUR DETEKSI WEB =====
+
+  /// Jarak dari ROI ke cincin bidik.
+  ///
+  /// Potongan dibuat sedikit lebih besar dari cincinnya supaya koin yang
+  /// posisinya belum pas betul tidak terpotong tepinya — tepi koin justru
+  /// bagian paling informatif bagi classifier.
+  static const double _kRoiVsReticle = 1.15;
+
+  /// Diameter cincin bidik dalam piksel logis, mengikuti LAYER 2 di build().
+  static const double _kReticleDiameter = 200.0;
+
+  /// Menyalakan detektor web setelah kamera siap.
+  ///
+  /// Kegagalan di sini TIDAK fatal: tanpa detektor aplikasi tetap menampilkan
+  /// preview kamera, hanya tidak mengenali koin. Penyebab paling sering adalah
+  /// tidak ada koneksi saat mengambil runtime MediaPipe.
+  Future<void> _startWebDetection(Size source) async {
+    _webSourceSize = source;
+
+    // Model yang SAMA dengan mobile. Aset Flutter disajikan di bawah assets/,
+    // dan deklarasinya sendiri sudah berawalan assets/, sehingga jalurnya
+    // menjadi assets/assets/.
+    final err = await initWebDetector('assets/assets/coin_model.tflite');
+    if (!mounted) return;
+
+    if (err != null) {
+      debugPrint('Detektor web tidak aktif: $err');
+      setState(() => _webDetectorError = err);
+      return;
+    }
+
+    _trackedSourceSize = source;
+    onWebDetectorResult(_onWebObservation);
+    startWebDetector();
+    debugPrint('Detektor web siap');
+  }
+
+  /// Menerima satu hasil dari detektor web dan menyalurkannya ke jalur
+  /// pelacakan yang sama dengan mobile.
+  void _onWebObservation(CoinObservation o) {
+    if (!mounted) return;
+
+    _trackedSourceSize = o.sourceSize;
+    final hero =
+        o.label.isEmpty ? null : _matchCoinByLabel(o.label, o.confidence);
+
+    // Kotak hanya diteruskan saat ada kecocokan, persis seperti mobile: di
+    // sana `rect` memang baru diisi ketika sebuah label cocok. Frame yang
+    // meleset sengaja membiarkan kotak terakhir apa adanya.
+    _applyDetection(
+      rect: hero != null ? o.box : null,
+      hero: hero,
+      sawAnyObject: o.sawAnyObject,
+    );
+  }
+
+  /// Memetakan sebuah kotak di layar kembali ke koordinat sumber gambar.
+  ///
+  /// Kebalikan persis dari [_trackedRectOnScreen]. Keduanya harus tetap
+  /// sepasang: kalau salah satu berubah, yang lain ikut.
+  Rect _screenRectToSource(Rect screenRect, Size screen, Size src) {
+    final scale =
+        math.max(screen.width / src.width, screen.height / src.height);
+    final dx = (screen.width - src.width * scale) / 2;
+    final dy = (screen.height - src.height * scale) / 2;
+    return Rect.fromLTRB(
+      (screenRect.left - dx) / scale,
+      (screenRect.top - dy) / scale,
+      (screenRect.right - dx) / scale,
+      (screenRect.bottom - dy) / scale,
+    );
+  }
+
+  /// Menghitung ROI dari cincin bidik dan mengirimkannya ke detektor.
+  ///
+  /// Dipanggil dari build() karena di situlah ukuran layar diketahui, tapi
+  /// hanya mengirim saat nilainya benar-benar berubah — build() berjalan jauh
+  /// lebih sering daripada layar berubah ukuran.
+  void _syncWebRoi(Size screen) {
+    final src = _webSourceSize;
+    if (src == null || src.isEmpty) return;
+
+    const side = _kReticleDiameter * _kRoiVsReticle;
+    final onScreen = Rect.fromCenter(
+      center: Offset(screen.width / 2, screen.height / 2),
+      width: side,
+      height: side,
+    );
+    final inSource = _screenRectToSource(onScreen, screen, src);
+
+    if (_lastPushedRoi == inSource) return;
+    _lastPushedRoi = inSource;
+    setWebDetectorRoi(inSource);
   }
 
   /// Mencocokkan koin berdasarkan teks (OCR)
@@ -582,23 +710,33 @@ class _ARScannerScreenState extends State<ARScannerScreen>
   /// Mencocokkan koin berdasarkan gambar (image labeling / classification)
   HeroModel? _matchCoinByImage(List<Label> labels) {
     for (final label in labels) {
-      final labelText = label.text.trim().toLowerCase();
-      debugPrint('🔍 Label: "$labelText" confidence=${label.confidence}');
+      final match = _matchCoinByLabel(label.text, label.confidence);
+      if (match != null) return match;
+    }
+    return null;
+  }
 
-      if (label.confidence < _kMinLabelConfidence) continue;
-      if (labelText == 'background') continue;
+  /// Mencocokkan satu label ke hero. Dipakai BERSAMA: mobile memanggilnya per
+  /// Label dari ML Kit, web per hasil klasifikasi MediaPipe. Keduanya memakai
+  /// model dan labels.txt yang sama persis, jadi aturan pencocokannya pun
+  /// harus satu, bukan dua salinan yang bisa menyimpang.
+  HeroModel? _matchCoinByLabel(String rawLabel, double confidence) {
+    final labelText = rawLabel.trim().toLowerCase();
+    debugPrint('🔍 Label: "$labelText" confidence=$confidence');
 
-      for (final hero in mockHeroes) {
-        if (hero.label.isEmpty) continue;
+    if (confidence < _kMinLabelConfidence) return null;
+    if (labelText == 'background') return null;
 
-        // Pencocokan HARUS persis. Sebelumnya dipakai substring, dan itu fatal
-        // begitu model mengeluarkan label berupa angka: "0" ikut cocok dengan
-        // "koin_1000" dan "2" dengan "koin_200".
-        if (hero.label.toLowerCase() == labelText) {
-          debugPrint('✅ Image match: ${hero.getName('id')}');
-          _lastMatchConfidence = label.confidence;
-          return hero;
-        }
+    for (final hero in mockHeroes) {
+      if (hero.label.isEmpty) continue;
+
+      // Pencocokan HARUS persis. Sebelumnya dipakai substring, dan itu fatal
+      // begitu model mengeluarkan label berupa angka: "0" ikut cocok dengan
+      // "koin_1000" dan "2" dengan "koin_200".
+      if (hero.label.toLowerCase() == labelText) {
+        debugPrint('✅ Image match: ${hero.getName('id')}');
+        _lastMatchConfidence = confidence;
+        return hero;
       }
     }
     return null;
@@ -693,7 +831,10 @@ class _ARScannerScreenState extends State<ARScannerScreen>
     _controller?.dispose();
     // Tab yang masih memegang track kamera terus menyalakan indikator rekaman
     // di browser, jadi ini wajib.
-    if (kIsWeb) stopWebCamera();
+    if (kIsWeb) {
+      stopWebDetector();
+      stopWebCamera();
+    }
     _pulseController.dispose();
     _rotateController.dispose();
     _lockController.dispose();
@@ -707,6 +848,10 @@ class _ARScannerScreenState extends State<ARScannerScreen>
     // Satu hero menampilkan SATU hal saja: model 3D atau kartu keterangan.
     final hero = _scannedHero;
     final screen = MediaQuery.of(context).size;
+    // ROI detektor ikut ukuran layar, jadi dihitung di sini — satu-satunya
+    // tempat ukuran layar diketahui. Pengirimannya sendiri dijaga agar hanya
+    // terjadi saat nilainya berubah.
+    if (kIsWeb) _syncWebRoi(screen);
     final trackedOnScreen = _trackedRectOnScreen(screen);
     final anchor =
         trackedOnScreen?.center ?? Offset(screen.width / 2, screen.height / 2);
@@ -778,11 +923,40 @@ class _ARScannerScreenState extends State<ARScannerScreen>
             else
               const Center(
                   child: CircularProgressIndicator(color: Color(0xFF6A0DAD)))
+          // Detektor gagal dimuat: beri tahu, jangan biarkan pengguna
+          // mengarahkan kamera ke koin tanpa pernah terjadi apa-apa.
           else if (_isCameraInitialized && _controller != null)
             _buildCamera()
           else
             const Center(
                 child: CircularProgressIndicator(color: Color(0xFF6A0DAD))),
+
+          // Detektor web gagal dimuat (paling sering: tidak ada koneksi saat
+          // mengambil runtime MediaPipe). Tanpa pemberitahuan, pengguna akan
+          // mengarahkan kamera ke koin dan tidak pernah terjadi apa-apa.
+          if (kIsWeb && _webDetectorError != null && _hasLivePreview)
+            Positioned(
+              left: 16,
+              right: 16,
+              bottom: 24,
+              child: IgnorePointer(
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 14, vertical: 10),
+                  decoration: BoxDecoration(
+                    color: Colors.black.withValues(alpha: 0.72),
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(color: Colors.white24),
+                  ),
+                  child: const Text(
+                    'Coin recognition is unavailable. Check your connection '
+                    'and reload the page.',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(color: Colors.white70, fontSize: 12),
+                  ),
+                ),
+              ),
+            ),
 
           // LAYER 1.5: Sapuan scanline, hanya saat masih mencari
           if (!_showResult && _hasLivePreview)
