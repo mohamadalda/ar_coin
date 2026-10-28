@@ -9,13 +9,22 @@ scanner-nya mati total tanpa pesan yang jelas.
 
 ## Sekali di awal
 
-**1. Pastikan DNS sudah mengarah.** Record `A` domain/subdomainmu harus menunjuk
-ke IP VPS **sebelum** container dinyalakan. Caddy membuktikan kepemilikan domain
-lewat HTTP, dan pembuktian itu gagal kalau DNS-nya belum sampai.
+**1. Pastikan DNS sudah mengarah.**
 
 ```bash
-dig +short imago.domainmu.com     # harus keluar IP VPS-mu
+dig +short imago.peruri.co.id     # harus keluar IP VPS-mu
 ```
+
+Lalu periksa apakah nama itu juga dikenal dari luar — jawabannya menentukan
+sumber sertifikat yang bisa dipakai:
+
+```bash
+dig +short @1.1.1.1 imago.peruri.co.id
+```
+
+Kosong atau NXDOMAIN berarti servernya hanya ada di DNS internal. Let's Encrypt
+tidak akan pernah bisa menerbitkan sertifikat untuknya — ia memverifikasi lewat
+DNS publik, dan itu juga berlaku untuk DNS-01. Pakai `TLS_MODE=internal`.
 
 **2. Siapkan VPS.** Docker dan plugin compose:
 
@@ -80,6 +89,40 @@ sekali sehingga sulit ditebak.
 setiap pengunjung — memang begitu rancangannya dan tidak bisa disembunyikan.
 Yang benar-benar menjaga datamu adalah Rules. Pastikan tulis-menulis tidak
 terbuka untuk publik.
+
+## Server internal: memasang root CA di perangkat
+
+Dengan `TLS_MODE=internal`, Caddy membuat CA-nya sendiri. Browser belum
+mengenalnya, jadi akan muncul peringatan sertifikat — dan selama peringatan itu
+ada, kamera tidak bisa dipercaya sepenuhnya oleh browser.
+
+Pasang root CA-nya sekali di tiap perangkat yang dipakai mencoba. Ambil dulu
+berkasnya dari container:
+
+```bash
+cd /srv/imago
+sudo docker compose cp caddy:/data/caddy/pki/authorities/local/root.crt ./imago-root-ca.crt
+```
+
+Pindahkan berkas itu ke HP, lalu:
+
+**Android** — Settings → Security → Encryption & credentials → Install a
+certificate → **CA certificate**. Chrome mempercayai CA yang dipasang pengguna
+untuk penjelajahan, jadi ini cukup.
+
+**iPhone** — buka berkasnya, pasang profilnya, lalu **wajib** aktifkan di
+Settings → General → About → Certificate Trust Settings. Tanpa langkah kedua
+itu, profilnya terpasang tapi tidak dipercaya.
+
+Kalau Peruri punya CA internal sendiri yang root-nya sudah terpasang di
+perangkat kantor, minta sertifikat untuk `imago.peruri.co.id` dari sana dan
+pakai itu — tidak ada yang perlu dipasang manual di satu pun perangkat:
+
+```
+TLS_MODE=/certs/imago.crt /certs/imago.key
+```
+
+Taruh kedua berkas di `/srv/imago/certs/`.
 
 ## Rilis berikutnya
 

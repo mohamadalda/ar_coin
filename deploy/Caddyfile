@@ -1,7 +1,9 @@
-# Caddy dipilih, bukan nginx + certbot, karena ia menerbitkan dan memperbarui
-# sertifikat Let's Encrypt sendiri tanpa cron job maupun container tambahan.
-# HTTPS di sini bukan pemanis: getUserMedia hanya tersedia di konteks aman,
-# jadi tanpa sertifikat yang sah seluruh fitur pemindaian koin MATI.
+# Caddy dipilih, bukan nginx + certbot, karena ia mengurus sertifikat sendiri
+# tanpa cron job maupun container tambahan.
+#
+# HTTPS di sini bukan pemanis keamanan: getUserMedia hanya tersedia di konteks
+# aman, jadi tanpa sertifikat yang DIPERCAYA PERANGKAT, seluruh pemindaian koin
+# mati sementara halamannya tetap tampil normal.
 
 {
 	email {$ACME_EMAIL}
@@ -10,6 +12,28 @@
 {$DOMAIN} {
 	root * /srv
 	encode zstd gzip
+
+	# ---- Sumber sertifikat ----
+	#
+	# Server ini hanya hidup di DNS internal Peruri: imago.peruri.co.id
+	# menunjuk 10.30.12.65 dari dalam jaringan, tapi NXDOMAIN dari internet.
+	# Let's Encrypt dan ZeroSSL memverifikasi lewat DNS publik, jadi keduanya
+	# TIDAK AKAN PERNAH bisa menerbitkan sertifikat untuk nama ini — termasuk
+	# lewat DNS-01, karena zona publiknya pun tidak mengenal subdomainnya.
+	#
+	# Pilihan TLS_MODE:
+	#   internal                      CA milik Caddy sendiri. Perangkat yang
+	#                                 memasang root CA-nya mempercayai penuh,
+	#                                 sehingga kamera berfungsi normal.
+	#   /certs/nama.crt /certs/nama.key
+	#                                 Sertifikat dari CA internal Peruri, bila
+	#                                 ada. Ini yang terbaik: root CA-nya
+	#                                 biasanya sudah terpasang di perangkat
+	#                                 kantor, jadi tidak perlu dipasang manual.
+	#
+	# Untuk Let's Encrypt (hanya bila nanti ada DNS publik yang mengarah ke
+	# sini), HAPUS baris tls di bawah seluruhnya.
+	tls {$TLS_MODE:internal}
 
 	header {
 		# Kamera diizinkan HANYA untuk halaman ini sendiri. Tanpa baris ini

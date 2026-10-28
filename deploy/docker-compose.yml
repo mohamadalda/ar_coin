@@ -11,9 +11,14 @@ services:
     environment:
       DOMAIN: ${DOMAIN}
       ACME_EMAIL: ${ACME_EMAIL}
+      TLS_MODE: ${TLS_MODE:-internal}
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - ./web:/srv:ro
+
+      # Dipakai hanya bila TLS_MODE menunjuk sertifikat dari CA internal
+      # Peruri. Taruh berkasnya di ./certs/ pada VPS.
+      - ./certs:/certs:ro
 
       # WAJIB. Di sinilah sertifikat dan kunci privatnya disimpan.
       #
