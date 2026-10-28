@@ -1,0 +1,30 @@
+# Dijalankan DI VPS, dari direktori yang sama dengan Caddyfile dan folder web/.
+services:
+  caddy:
+    image: caddy:2-alpine
+    container_name: imago-web
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"   # HTTP/3
+    environment:
+      DOMAIN: ${DOMAIN}
+      ACME_EMAIL: ${ACME_EMAIL}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./web:/srv:ro
+
+      # WAJIB. Di sinilah sertifikat dan kunci privatnya disimpan.
+      #
+      # Tanpa volume ini, setiap `docker compose down` menghapus sertifikat dan
+      # Caddy meminta yang baru saat start berikutnya. Let's Encrypt membatasi
+      # 5 sertifikat per domain per minggu — beberapa kali restart saja dan
+      # domainmu terkunci sampai limitnya reset, tepat saat kamu paling
+      # membutuhkannya.
+      - caddy_data:/data
+      - caddy_config:/config
+
+volumes:
+  caddy_data:
+  caddy_config:

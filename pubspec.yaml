@@ -88,7 +88,15 @@ flutter:
   uses-material-design: true
 
   assets:
-    - assets/
+    # Didaftarkan satu per satu, BUKAN dengan glob `assets/`.
+    #
+    # Glob itu memborong seluruh isi folder, termasuk yang tidak pernah dipakai:
+    # dua salinan model bertimestamp hasil ekspor ulang (@2 MB), sebuah .zip
+    # ekspor (532 KB), model vww_96_grayscale yang tidak terpakai (531 KB) dan
+    # .DS_Store. Semuanya ikut terkirim ke setiap pengguna — ~5 MB di APK Play
+    # Store dan ~5 MB unduhan percuma di web.
+    - assets/heroes.json
+    - assets/coin_model.tflite
     - assets/images/
     - assets/audio/
     - assets/models/
