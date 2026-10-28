@@ -119,9 +119,26 @@ itu, profilnya terpasang tapi tidak dipercaya.
 Ini pilihan terbaik: root CA-nya biasanya sudah terpasang di perangkat kantor,
 jadi tidak ada satu pun perangkat yang perlu disetel manual.
 
+Sertifikatnya ditaruh di `/srv/imago/certs/` pada VPS. Cara paling aman lewat
+skrip, yang memeriksa dulu sebelum mengirim:
+
 ```bash
-mkdir -p /srv/imago/certs
-# taruh berkasnya di sini, lalu di .env:
+VPS_HOST=svr-app-prd-imago@10.30.12.65 \
+  ./deploy/install-cert.sh ~/Downloads/imago.crt ~/Downloads/imago.key
+```
+
+Skrip itu menolak lebih awal bila berkasnya bukan PEM, bila kunci dan
+sertifikatnya bukan sepasang, dan memperingatkan bila rantai perantaranya
+hilang. Ia juga menampilkan nama yang dicakup sertifikat, supaya bisa kamu
+cocokkan dengan `DOMAIN` di `.env`.
+
+Manual, kalau lebih suka:
+
+```bash
+mkdir -p /srv/imago/certs && chmod 700 /srv/imago/certs
+# salin imago.crt dan imago.key ke sana, lalu:
+chmod 600 /srv/imago/certs/imago.key
+# dan di .env:
 #   TLS_MODE=/certs/imago.crt /certs/imago.key
 ```
 
