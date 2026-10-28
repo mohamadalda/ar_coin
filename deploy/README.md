@@ -21,7 +21,38 @@ dig +short imago.domainmu.com     # harus keluar IP VPS-mu
 
 ```bash
 curl -fsSL https://get.docker.com | sh
-mkdir -p /srv/imago
+```
+
+Lalu buat direkturinya. `/srv` milik root, jadi perlu sudo — dan kepemilikannya
+dipindah ke user SSH-mu supaya rsync bisa menulis ke sana tanpa sudo:
+
+```bash
+sudo mkdir -p /srv/imago
+sudo chown -R "$USER:$USER" /srv/imago
+```
+
+Terakhir, izin menjalankan Docker. Skrip deploy memanggil `docker compose`
+lewat SSH non-interaktif, dan di sana tidak ada tempat mengetik kata sandi
+sudo. Dua pilihan:
+
+```bash
+# A. Masukkan user ke grup docker, lalu login ulang SSH agar berlaku.
+sudo usermod -aG docker "$USER"
+
+# B. Atau biarkan apa adanya dan jalankan deploy dengan:
+#    DOCKER_CMD="sudo docker" VPS_HOST=... ./deploy/deploy.sh
+#    (hanya berhasil kalau user boleh sudo TANPA kata sandi)
+```
+
+Pilihan A lebih praktis, tapi perlu disadari: anggota grup `docker` praktis
+setara root di mesin itu, karena bisa menjalankan container yang me-mount
+seluruh filesystem host. Di server produksi, pastikan itu memang diperbolehkan
+kebijakan tempatmu.
+
+Setelah login ulang, pastikan berhasil tanpa sudo:
+
+```bash
+docker ps
 ```
 
 Port 80 dan 443 harus terbuka di firewall. Port 80 tetap diperlukan walau situs

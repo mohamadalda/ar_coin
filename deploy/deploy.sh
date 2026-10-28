@@ -11,6 +11,11 @@ set -euo pipefail
 
 VPS_HOST="${VPS_HOST:?Set VPS_HOST dulu, misal: VPS_HOST=root@1.2.3.4 ./deploy/deploy.sh}"
 REMOTE_DIR="${REMOTE_DIR:-/srv/imago}"
+
+# Perintah docker di VPS. Kalau user SSH-mu belum masuk grup `docker`, jalankan
+# dengan DOCKER_CMD="sudo docker" — tapi sudo lewat SSH non-interaktif hanya
+# berhasil bila user itu boleh sudo tanpa kata sandi.
+DOCKER_CMD="${DOCKER_CMD:-docker}"
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 cd "$REPO_DIR"
@@ -34,8 +39,8 @@ echo "==> Kirim hasil build"
 rsync -az --delete --info=progress2 build/web/ "$VPS_HOST:$REMOTE_DIR/web/"
 
 echo "==> Nyalakan ulang container"
-ssh "$VPS_HOST" "cd '$REMOTE_DIR' && docker compose up -d"
+ssh "$VPS_HOST" "cd '$REMOTE_DIR' && $DOCKER_CMD compose up -d"
 
 echo
 echo "Selesai. Buka https://\$DOMAIN di HP dan izinkan kamera."
-echo "Kalau sertifikat belum terbit, lihat: ssh $VPS_HOST 'cd $REMOTE_DIR && docker compose logs -f caddy'"
+echo "Kalau sertifikat belum terbit, lihat: ssh $VPS_HOST 'cd $REMOTE_DIR && $DOCKER_CMD compose logs -f caddy'"
