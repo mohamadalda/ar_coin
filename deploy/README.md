@@ -114,15 +114,58 @@ untuk penjelajahan, jadi ini cukup.
 Settings → General → About → Certificate Trust Settings. Tanpa langkah kedua
 itu, profilnya terpasang tapi tidak dipercaya.
 
-Kalau Peruri punya CA internal sendiri yang root-nya sudah terpasang di
-perangkat kantor, minta sertifikat untuk `imago.peruri.co.id` dari sana dan
-pakai itu — tidak ada yang perlu dipasang manual di satu pun perangkat:
+## Memakai sertifikat dari CA internal perusahaan
 
-```
-TLS_MODE=/certs/imago.crt /certs/imago.key
+Ini pilihan terbaik: root CA-nya biasanya sudah terpasang di perangkat kantor,
+jadi tidak ada satu pun perangkat yang perlu disetel manual.
+
+```bash
+mkdir -p /srv/imago/certs
+# taruh berkasnya di sini, lalu di .env:
+#   TLS_MODE=/certs/imago.crt /certs/imago.key
 ```
 
-Taruh kedua berkas di `/srv/imago/certs/`.
+### Formatnya harus PEM, dan harus rantai lengkap
+
+Dua hal yang paling sering menggagalkan langkah ini.
+
+**Kalau dapat `.pfx` atau `.p12`** (lazim dari CA Windows/AD), ubah dulu:
+
+```bash
+# leaf + seluruh rantai perantara, sekaligus
+openssl pkcs12 -in imago.pfx -nokeys -nodes -out imago.crt
+
+# kunci privat, tanpa sandi
+openssl pkcs12 -in imago.pfx -nocerts -nodes -out imago.key
+```
+
+**Kalau dapat berkas terpisah** (leaf dan intermediate sendiri-sendiri),
+gabungkan — leaf DULU, baru perantaranya:
+
+```bash
+cat leaf.crt intermediate.crt > imago.crt
+```
+
+Urutannya penting. Kalau hanya leaf-nya yang dipasang, browser desktop sering
+tetap menerima karena sudah meng-cache perantaranya dari situs lain, tapi
+**Android menolak** dan kameranya ikut mati — gejala yang menyesatkan karena
+tampak seperti masalah aplikasi.
+
+Periksa hasilnya sebelum dipakai:
+
+```bash
+openssl x509 -in imago.crt -noout -subject -dates
+grep -c 'BEGIN CERTIFICATE' imago.crt    # harus >= 2 bila ada perantara
+openssl rsa  -in imago.key -noout -check
+```
+
+Pastikan juga kunci dan sertifikatnya memang sepasang — keduanya harus
+menghasilkan hash yang sama:
+
+```bash
+openssl x509 -in imago.crt -noout -modulus | openssl md5
+openssl rsa  -in imago.key -noout -modulus | openssl md5
+```
 
 ## Rilis berikutnya
 
