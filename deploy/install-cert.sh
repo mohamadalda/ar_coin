@@ -110,8 +110,25 @@ MSG
 read -r -p "    Kirim ke VPS sekarang? [y/N] " lanjut
 [ "$lanjut" = "y" ] || [ "$lanjut" = "Y" ] || exit 1
 
+echo "==> Siapkan folder di VPS"
+# Folder certs sering sudah ada dan DIMILIKI ROOT: docker membuat direktori
+# sumber bind-mount yang belum ada sebagai root saat container pertama nyala.
+# User SSH biasa lalu tidak bisa menulis maupun meng-chmod-nya.
+if ! ssh "$VPS_HOST" "mkdir -p '$REMOTE_DIR/certs' && chmod 700 '$REMOTE_DIR/certs' && test -w '$REMOTE_DIR/certs'" 2>/dev/null; then
+  cat >&2 <<MSG
+
+!! $REMOTE_DIR/certs tidak bisa ditulis oleh user SSH-mu.
+
+   Folder itu kemungkinan dibuat root oleh docker saat container pertama
+   nyala. Jalankan ini di VPS, lalu ulangi perintah ini:
+
+     sudo chown -R "\$USER:\$USER" $REMOTE_DIR/certs && chmod 700 $REMOTE_DIR/certs
+
+MSG
+  exit 1
+fi
+
 echo "==> Kirim"
-ssh "$VPS_HOST" "mkdir -p '$REMOTE_DIR/certs' && chmod 700 '$REMOTE_DIR/certs'"
 scp "$CRT" "$VPS_HOST:$REMOTE_DIR/certs/imago.crt"
 scp "$KEY" "$VPS_HOST:$REMOTE_DIR/certs/imago.key"
 ssh "$VPS_HOST" "chmod 600 '$REMOTE_DIR/certs/imago.key'"
