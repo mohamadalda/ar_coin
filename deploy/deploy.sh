@@ -17,6 +17,14 @@ REMOTE_DIR="${REMOTE_DIR:-/srv/imago}"
 # berhasil bila user itu boleh sudo tanpa kata sandi.
 DOCKER_CMD="${DOCKER_CMD:-docker}"
 
+# sudo menolak berjalan tanpa terminal ketika ia perlu menanyakan kata sandi,
+# dan ssh non-interaktif memang tidak menyediakannya. Jadi khusus saat
+# DOCKER_CMD memakai sudo, mintakan terminal dengan -t.
+SSH_TTY_FLAG=""
+case "$DOCKER_CMD" in
+  sudo*) SSH_TTY_FLAG="-t" ;;
+esac
+
 # Satu koneksi SSH dipakai ulang untuk semua langkah di bawah. Tanpa ini,
 # tiap ssh dan rsync membuka koneksi sendiri dan meminta kata sandi lagi —
 # empat kali untuk satu kali deploy.
@@ -56,7 +64,7 @@ rsync -az --delete $PROGRESS -e "ssh $SSH_OPTS" \
   build/web/ "$VPS_HOST:$REMOTE_DIR/web/"
 
 echo "==> Nyalakan ulang container"
-ssh $SSH_OPTS "$VPS_HOST" "cd '$REMOTE_DIR' && $DOCKER_CMD compose up -d"
+ssh $SSH_OPTS $SSH_TTY_FLAG "$VPS_HOST" "cd '$REMOTE_DIR' && $DOCKER_CMD compose up -d"
 
 echo
 echo "Selesai. Buka https://\$DOMAIN di HP dan izinkan kamera."
