@@ -54,8 +54,29 @@ fi
 
 echo "==> Kirim konfigurasi"
 ssh $SSH_OPTS "$VPS_HOST" "mkdir -p '$REMOTE_DIR/web'"
-rsync -az -e "ssh $SSH_OPTS" deploy/Caddyfile deploy/docker-compose.yml \
+rsync -az -e "ssh $SSH_OPTS" \
+  deploy/Caddyfile deploy/docker-compose.yml deploy/.env.example \
   "$VPS_HOST:$REMOTE_DIR/"
+
+# .env menentukan domain mana yang dilayani. Tanpa berkas itu, {$DOMAIN} di
+# Caddyfile menjadi string kosong, Caddy gagal mengurai konfigurasinya, dan
+# container masuk restart loop — gejala yang tidak menyebut .env sama sekali,
+# jadi lebih baik dihentikan di sini dengan pesan yang jelas.
+if ! ssh $SSH_OPTS "$VPS_HOST" "test -f '$REMOTE_DIR/.env'"; then
+  cat >&2 <<MSG
+
+!! $REMOTE_DIR/.env belum ada di VPS.
+
+   Buat dulu di sana, lalu jalankan skrip ini lagi:
+
+     cat > $REMOTE_DIR/.env <<'EOF'
+     DOMAIN=imago.domainmu.com
+     ACME_EMAIL=email-kamu@contoh.com
+     EOF
+
+MSG
+  exit 1
+fi
 
 echo "==> Kirim hasil build"
 # --delete penting: tanpa itu berkas yang sudah dihapus dari build tetap
