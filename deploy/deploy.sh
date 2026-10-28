@@ -16,6 +16,21 @@ REMOTE_DIR="${REMOTE_DIR:-/srv/imago}"
 # dengan DOCKER_CMD="sudo docker" — tapi sudo lewat SSH non-interaktif hanya
 # berhasil bila user itu boleh sudo tanpa kata sandi.
 DOCKER_CMD="${DOCKER_CMD:-docker}"
+
+# Satu koneksi SSH dipakai ulang untuk semua langkah di bawah. Tanpa ini,
+# tiap ssh dan rsync membuka koneksi sendiri dan meminta kata sandi lagi —
+# empat kali untuk satu kali deploy.
+SSH_CTL="$HOME/.ssh/cm-imago-%h"
+SSH_OPTS="-o ControlMaster=auto -o ControlPath=$SSH_CTL -o ControlPersist=120"
+mkdir -p "$HOME/.ssh"
+
+# --info=progress2 hanya ada di rsync GNU. macOS 15 ke atas mengapalkan
+# openrsync, yang menolaknya dan menggagalkan seluruh transfer.
+if rsync --help 2>&1 | grep -q -- '--info'; then
+  PROGRESS="--info=progress2"
+else
+  PROGRESS="--progress"
+fi
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 cd "$REPO_DIR"
@@ -30,16 +45,18 @@ if ! grep -q "kWebFirebaseOptions = FirebaseOptions" lib/firebase_options_web.da
 fi
 
 echo "==> Kirim konfigurasi"
-ssh "$VPS_HOST" "mkdir -p '$REMOTE_DIR/web'"
-rsync -az deploy/Caddyfile deploy/docker-compose.yml "$VPS_HOST:$REMOTE_DIR/"
+ssh $SSH_OPTS "$VPS_HOST" "mkdir -p '$REMOTE_DIR/web'"
+rsync -az -e "ssh $SSH_OPTS" deploy/Caddyfile deploy/docker-compose.yml \
+  "$VPS_HOST:$REMOTE_DIR/"
 
 echo "==> Kirim hasil build"
 # --delete penting: tanpa itu berkas yang sudah dihapus dari build tetap
 # tertinggal di server dan ikut terlayani selamanya.
-rsync -az --delete --info=progress2 build/web/ "$VPS_HOST:$REMOTE_DIR/web/"
+rsync -az --delete $PROGRESS -e "ssh $SSH_OPTS" \
+  build/web/ "$VPS_HOST:$REMOTE_DIR/web/"
 
 echo "==> Nyalakan ulang container"
-ssh "$VPS_HOST" "cd '$REMOTE_DIR' && $DOCKER_CMD compose up -d"
+ssh $SSH_OPTS "$VPS_HOST" "cd '$REMOTE_DIR' && $DOCKER_CMD compose up -d"
 
 echo
 echo "Selesai. Buka https://\$DOMAIN di HP dan izinkan kamera."
