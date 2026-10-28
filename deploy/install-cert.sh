@@ -4,7 +4,11 @@
 #
 # Dijalankan dari MESIN LOKAL, menunjuk berkas .crt dan .key yang kamu punya:
 #
-#   VPS_HOST=user@10.30.12.65 ./deploy/install-cert.sh ~/Downloads/imago.crt ~/Downloads/imago.key
+#   VPS_HOST=user@10.30.12.65 ./deploy/install-cert.sh LEAF.crt KUNCI.key [PERANTARA.crt]
+#
+# Argumen ketiga opsional: berkas perantara (ca-bundle/chain/intermediate) dari
+# penerbit. Bila diberikan, rantai lengkapnya dirakit di sini — leaf lebih
+# dulu, lalu perantaranya — dan diverifikasi sebelum dikirim.
 #
 # Semua pemeriksaan di bawah dilakukan SEBELUM berkas dikirim, karena kesalahan
 # sertifikat tidak terlihat di tempat yang masuk akal: halamannya terbuka di
@@ -13,12 +17,39 @@ set -euo pipefail
 
 CRT="${1:?Berikan path berkas .crt sebagai argumen pertama}"
 KEY="${2:?Berikan path berkas .key sebagai argumen kedua}"
+CHAIN="${3:-}"
 VPS_HOST="${VPS_HOST:?Set VPS_HOST, misal: VPS_HOST=svr-app-prd-imago@10.30.12.65}"
 REMOTE_DIR="${REMOTE_DIR:-/srv/imago}"
 
-for f in "$CRT" "$KEY"; do
+for f in "$CRT" "$KEY" ${CHAIN:+"$CHAIN"}; do
   [ -f "$f" ] || { echo "Tidak ditemukan: $f" >&2; exit 1; }
 done
+
+# Berkas kerja; yang asli tidak pernah diubah.
+TMP="$(mktemp -d)"
+trap 'rm -rf "$TMP"' EXIT
+
+# Penerbit kadang mengirim DER (biner), bukan PEM. Diubah kalau perlu.
+ke_pem() {
+  if grep -q 'BEGIN CERTIFICATE' "$1" 2>/dev/null; then
+    cat "$1"
+  elif openssl x509 -inform DER -in "$1" -outform PEM 2>/dev/null; then
+    : # sudah tercetak oleh openssl
+  else
+    echo "!! $1 bukan PEM maupun DER yang bisa dibaca." >&2
+    return 1
+  fi
+}
+
+if [ -n "$CHAIN" ]; then
+  echo "==> Rakit rantai lengkap"
+  # Urutannya WAJIB leaf dulu, baru perantara. Terbalik dan sebagian klien
+  # menolaknya.
+  ke_pem "$CRT"   >  "$TMP/fullchain.crt"
+  ke_pem "$CHAIN" >> "$TMP/fullchain.crt"
+  CRT="$TMP/fullchain.crt"
+  echo "    $(grep -c 'BEGIN CERTIFICATE' "$CRT") sertifikat dirakit"
+fi
 
 echo "==> Periksa format"
 if ! grep -q 'BEGIN CERTIFICATE' "$CRT"; then

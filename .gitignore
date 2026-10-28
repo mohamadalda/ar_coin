@@ -50,3 +50,15 @@ tool/.venv/
 android/key.properties
 **/*.jks
 **/*.keystore
+
+# ---- Sertifikat dan kunci privat ----
+# JANGAN PERNAH masuk riwayat git. Riwayat git disalin ke setiap clone dan
+# setiap fork, dan menghapusnya belakangan tidak menarik kembali salinan yang
+# sudah tersebar — kunci yang pernah ter-commit harus dianggap bocor dan
+# diterbitkan ulang.
+deploy/cert/
+deploy/certs/
+*.key
+*.pem
+*.pfx
+*.p12
