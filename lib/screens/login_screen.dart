@@ -18,19 +18,17 @@ class _LoginScreenState extends State<LoginScreen> {
 
   Future<void> _handleLogin() async {
     final username = _usernameCtrl.text.trim();
-    final password = _passwordCtrl.text.trim();
+    // Kata sandi tidak di-trim: spasi bisa menjadi bagian sah kata sandi.
+    final password = _passwordCtrl.text;
 
     if (username.isEmpty || password.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Username dan Password harus diisi')),
+        const SnackBar(content: Text('Email dan Password harus diisi')),
       );
       return;
     }
 
     setState(() => _isLoading = true);
-
-    // Simulate small delay for UX
-    await Future.delayed(const Duration(milliseconds: 600));
 
     final success = await AuthService.login(username, password);
     
@@ -47,8 +45,10 @@ class _LoginScreenState extends State<LoginScreen> {
       Navigator.pop(context); // Return to home
     } else {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Username atau Password salah'),
+        SnackBar(
+          content: Text(AuthService.lastError.isNotEmpty
+              ? AuthService.lastError
+              : 'Login gagal'),
           backgroundColor: Colors.red,
         ),
       );
@@ -152,9 +152,11 @@ class _LoginScreenState extends State<LoginScreen> {
                         // Username Field
                         TextField(
                           controller: _usernameCtrl,
+                          keyboardType: TextInputType.emailAddress,
+                          autocorrect: false,
                           style: const TextStyle(color: Colors.white),
                           decoration: InputDecoration(
-                            hintText: "Username",
+                            hintText: "Email",
                             hintStyle: TextStyle(color: Colors.white.withValues(alpha: 0.5)),
                             prefixIcon: const Icon(Icons.person, color: Colors.white70),
                             filled: true,

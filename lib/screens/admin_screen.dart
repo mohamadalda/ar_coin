@@ -176,6 +176,35 @@ class _AdminScreenState extends State<AdminScreen> {
     );
   }
 
+  /// Kirim perubahan satu hero ke Firestore. Bila label/nama berubah, id
+  /// dokumennya ikut berubah, jadi dokumen lama dihapus agar tidak yatim.
+  Future<void> _syncSave(HeroModel hero, {HeroModel? previous}) async {
+    if (!FirebaseService.ready) return;
+    final ok = await upsertHeroInFirestore(hero);
+    if (ok && previous != null) {
+      final oldId = heroDocId(previous);
+      if (oldId != heroDocId(hero)) await deleteHeroFromFirestore(oldId);
+    }
+    _reportSync(ok);
+  }
+
+  Future<void> _syncDelete(HeroModel hero) async {
+    if (!FirebaseService.ready) return;
+    _reportSync(await deleteHeroFromFirestore(heroDocId(hero)));
+  }
+
+  void _reportSync(bool ok) {
+    if (ok || !mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text(
+            'Tersimpan di perangkat, tetapi gagal dikirim ke server. '
+            'Pastikan akun memiliki hak administrator dan ada koneksi.'),
+        backgroundColor: Colors.orange,
+      ),
+    );
+  }
+
   void _confirmDelete(BuildContext context, int index) {
     showDialog(
       context: context,
@@ -195,6 +224,7 @@ class _AdminScreenState extends State<AdminScreen> {
                 mockHeroes.removeAt(index);
               });
               saveHeroes();
+              _syncDelete(hero);
               await FileHelper.deleteLocalFile(hero.image);
               await FileHelper.deleteLocalFile(hero.audio);
               await FileHelper.deleteLocalFile(hero.model);
@@ -213,6 +243,12 @@ class _AdminScreenState extends State<AdminScreen> {
     final nameIdCtrl = TextEditingController(text: hero?.name['id'] ?? '');
     final coinIdCtrl = TextEditingController(text: hero?.coin['id'] ?? '');
     final descIdCtrl = TextEditingController(text: hero?.description['id'] ?? '');
+    // Terjemahan Inggris diisi manual oleh admin. Penerjemahan mesin otomatis
+    // sudah dihapus (temuan pentest IMAGO no. 11), jadi bahasa lain akan
+    // memakai teks Inggris ini sebagai cadangan.
+    final nameEnCtrl = TextEditingController(text: hero?.name['en'] ?? '');
+    final coinEnCtrl = TextEditingController(text: hero?.coin['en'] ?? '');
+    final descEnCtrl = TextEditingController(text: hero?.description['en'] ?? '');
     final keywordsCtrl = TextEditingController(text: hero?.keywords.join(', ') ?? '');
     final labelCtrl = TextEditingController(text: hero?.label ?? '');
 
@@ -249,6 +285,9 @@ class _AdminScreenState extends State<AdminScreen> {
                     _buildTextField(nameIdCtrl, 'Nama Pahlawan'),
                     _buildTextField(coinIdCtrl, 'Teks Koin'),
                     _buildTextField(descIdCtrl, 'Deskripsi Pahlawan', maxLines: 3),
+                    _buildTextField(nameEnCtrl, 'Nama Pahlawan (English)'),
+                    _buildTextField(coinEnCtrl, 'Teks Koin (English)'),
+                    _buildTextField(descEnCtrl, 'Deskripsi Pahlawan (English)', maxLines: 3),
                     _buildTextField(keywordsCtrl, 'Keywords (pisahkan dengan koma)'),
                     _buildTextField(labelCtrl, 'Label Model'),
 
@@ -431,16 +470,26 @@ class _AdminScreenState extends State<AdminScreen> {
                             }
                           }
 
-                          // Hanya simpan teks 'id' agar bahasa lain otomatis di-translate ulang
+                          // Hanya teks resmi (id + en) yang disimpan. Terjemahan
+                          // mesin lama di bahasa lain sengaja dibuang.
+                          Map<String, String> texts(
+                                  TextEditingController idCtrl,
+                                  TextEditingController enCtrl) =>
+                              {
+                                'id': idCtrl.text.trim(),
+                                if (enCtrl.text.trim().isNotEmpty)
+                                  'en': enCtrl.text.trim(),
+                              };
+
                           final newHero = HeroModel(
-                            name: {'id': nameIdCtrl.text},
-                            coin: {'id': coinIdCtrl.text},
+                            name: texts(nameIdCtrl, nameEnCtrl),
+                            coin: texts(coinIdCtrl, coinEnCtrl),
                             image: currentImage,
                             audio: currentAudio,
                             model: currentModel,
                             infoImage: currentInfoImage,
                             displayMode: currentDisplayMode,
-                            description: {'id': descIdCtrl.text},
+                            description: texts(descIdCtrl, descEnCtrl),
                             keywords: keywordsCtrl.text.split(',').map((e) => e.trim().toUpperCase()).where((e) => e.isNotEmpty).toList(),
                             label: labelCtrl.text,
                           );
@@ -452,8 +501,9 @@ class _AdminScreenState extends State<AdminScreen> {
                               mockHeroes.add(newHero);
                             }
                           });
-                          
+
                           saveHeroes();
+                          _syncSave(newHero, previous: isEditing ? hero : null);
                           Navigator.pop(ctx);
                         },
                         child: const Text('Simpan', style: TextStyle(color: Colors.white)),

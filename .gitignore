@@ -48,5 +48,11 @@ tool/.venv/
 
 # Kunci penandatanganan Android — JANGAN pernah ikut ter-commit.
 android/key.properties
+
+# Kunci service account Firebase (dipakai tool/set_admin_claim.py).
+*service-account*.json
+*-firebase-adminsdk-*.json
+.firebase/
+firebase-debug.log
 **/*.jks
 **/*.keystore

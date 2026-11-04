@@ -1,0 +1,48 @@
+rules_version = '2';
+
+// Firestore Security Rules — proyek imago-3137c.
+//
+// Menutup temuan pentest IMAGO (4 Nov 2026):
+//   No. 2  Firestore dapat diubah siapa pun tanpa login
+//   No. 8  Firestore dapat dibaca siapa pun tanpa login (selain koleksi heroes)
+//   No. 3  Hak admin kini ditegakkan server lewat custom claim `admin`
+//
+// Prinsip: tolak secara bawaan. Koleksi yang tidak disebut di bawah ini
+// otomatis tidak bisa dibaca maupun ditulis. Setiap koleksi baru WAJIB
+// ditambahkan aturannya secara eksplisit di file ini.
+//
+// Deploy:  firebase deploy --only firestore:rules
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Admin = token Firebase Auth yang membawa custom claim admin == true.
+    // Claim diberikan lewat tool/set_admin_claim.py (Admin SDK), tidak bisa
+    // diubah dari aplikasi atau peramban.
+    function isAdmin() {
+      return request.auth != null && request.auth.token.admin == true;
+    }
+
+    // Skema dokumen hero. Hanya field ini yang boleh ditulis, sehingga
+    // properti seperti is_admin / role tidak bisa disisipkan (mass assignment).
+    function isValidHero(d) {
+      return d.keys().hasOnly(['name', 'coin', 'image', 'audio', 'displayMode',
+                               'description', 'keywords', 'label'])
+        && d.keys().hasAll(['name', 'coin', 'description'])
+        && d.name is map && d.name.size() <= 20
+        && d.coin is map && d.coin.size() <= 20
+        && d.description is map && d.description.size() <= 20
+        && d.get('image', '') is string && d.get('image', '').size() <= 512
+        && d.get('audio', '') is string && d.get('audio', '').size() <= 512
+        && d.get('label', '') is string && d.get('label', '').size() <= 128
+        && d.get('displayMode', 'panel') in ['panel', 'both']
+        && d.get('keywords', []) is list && d.get('keywords', []).size() <= 50;
+    }
+
+    match /heroes/{heroId} {
+      // Data tokoh memang ditampilkan ke publik.
+      allow read: if true;
+      allow create, update: if isAdmin() && isValidHero(request.resource.data);
+      allow delete: if isAdmin();
+    }
+  }
+}

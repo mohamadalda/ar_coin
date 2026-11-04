@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../utils/auth_service.dart';
 import '../utils/firebase_service.dart';
 
 class HeroModel {
@@ -110,10 +111,20 @@ class HeroModel {
         label: label,
       );
 
-  // Helper untuk mengambil teks berdasarkan bahasa
-  String getName(String lang) => name[lang] ?? name['id'] ?? '';
-  String getCoin(String lang) => coin[lang] ?? coin['id'] ?? '';
-  String getDescription(String lang) => description[lang] ?? description['id'] ?? '';
+  // Helper untuk mengambil teks berdasarkan bahasa. Bahasa tanpa terjemahan
+  // resmi jatuh ke Inggris dulu (lebih mungkin dipahami pengunjung asing),
+  // baru ke Indonesia sebagai bahasa sumber.
+  static String _pick(Map<String, String> m, String lang) {
+    for (final k in [lang, 'en', 'id']) {
+      final v = m[k];
+      if (v != null && v.trim().isNotEmpty) return v;
+    }
+    return '';
+  }
+
+  String getName(String lang) => _pick(name, lang);
+  String getCoin(String lang) => _pick(coin, lang);
+  String getDescription(String lang) => _pick(description, lang);
 }
 
 List<HeroModel> mockHeroes = [];
@@ -160,27 +171,48 @@ Future<List<HeroModel>?> _fetchHeroesFromFirestore() async {
   }
 }
 
-/// Menulis seluruh hero ke Firestore, menimpa koleksi yang ada.
-Future<bool> pushHeroesToFirestore() async {
-  if (!FirebaseService.ready) return false;
+/// Penulisan ke Firestore hanya untuk sesi administrator.
+///
+/// Ini hanya penyaring di sisi aplikasi agar pengunjung biasa tidak pernah
+/// mencoba menulis. Penegakan sebenarnya ada di `firestore.rules`, yang
+/// menolak penulisan tanpa claim `admin` — temuan pentest IMAGO no. 2.
+bool get _canWriteRemote => FirebaseService.ready && AuthService.isLoggedIn.value;
+
+/// Id dokumen Firestore untuk sebuah hero.
+String heroDocId(HeroModel h) => FirebaseService.docIdFor(_heroKey(h));
+
+/// Menulis SATU hero ke Firestore (membuat atau menimpa dokumennya saja).
+///
+/// Sebelumnya setiap simpan menghapus seluruh koleksi lalu menulis ulang dari
+/// salinan di perangkat, sehingga dokumen yang tidak ada di salinan itu ikut
+/// terhapus dan dua penyimpanan bersamaan saling menimpa.
+Future<bool> upsertHeroInFirestore(HeroModel hero) async {
+  if (!_canWriteRemote) return false;
   try {
-    final col = FirebaseFirestore.instance.collection(_kHeroesCollection);
-    final existing = await col.get();
-    final batch = FirebaseFirestore.instance.batch();
-    // Hapus dulu yang lama supaya hero yang dihapus di Admin benar-benar
-    // hilang, bukan tertinggal sebagai dokumen yatim.
-    for (final d in existing.docs) {
-      batch.delete(d.reference);
-    }
-    for (final h in mockHeroes) {
-      batch.set(
-          col.doc(FirebaseService.docIdFor(_heroKey(h))), h.toFirestoreJson());
-    }
-    await batch.commit();
-    debugPrint('Hero dikirim ke Firestore: ${mockHeroes.length}');
+    await FirebaseFirestore.instance
+        .collection(_kHeroesCollection)
+        .doc(heroDocId(hero))
+        .set(hero.toFirestoreJson());
+    debugPrint('Hero disimpan ke Firestore: ${heroDocId(hero)}');
     return true;
   } catch (e) {
     debugPrint('Gagal menulis hero ke Firestore: $e');
+    return false;
+  }
+}
+
+/// Menghapus SATU dokumen hero dari Firestore.
+Future<bool> deleteHeroFromFirestore(String docId) async {
+  if (!_canWriteRemote) return false;
+  try {
+    await FirebaseFirestore.instance
+        .collection(_kHeroesCollection)
+        .doc(docId)
+        .delete();
+    debugPrint('Hero dihapus dari Firestore: $docId');
+    return true;
+  } catch (e) {
+    debugPrint('Gagal menghapus hero dari Firestore: $e');
     return false;
   }
 }
@@ -307,15 +339,15 @@ Future<void> loadHeroes() async {
   }
 }
 
+/// Menyimpan daftar hero ke penyimpanan LOKAL perangkat saja.
+///
+/// Tidak menulis ke Firestore. Perubahan oleh admin dikirim per dokumen lewat
+/// [upsertHeroInFirestore] / [deleteHeroFromFirestore].
 Future<void> saveHeroes() async {
   try {
     final prefs = await SharedPreferences.getInstance();
     final String encodedData = json.encode(mockHeroes.map((h) => h.toJson()).toList());
     await prefs.setString(_kHeroesPrefsKey, encodedData);
-    // Selalu simpan lokal lebih dulu: kalau pengiriman ke Firestore gagal
-    // (tidak ada sinyal, Firebase belum disiapkan), suntingan pengguna tidak
-    // boleh ikut hilang.
-    await pushHeroesToFirestore();
     debugPrint('Saved heroes to SharedPreferences');
   } catch (e) {
     debugPrint('Failed to save heroes data: $e');
