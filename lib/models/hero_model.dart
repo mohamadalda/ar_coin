@@ -5,6 +5,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../utils/auth_service.dart';
+import '../utils/file_helper.dart';
 import '../utils/firebase_service.dart';
 
 class HeroModel {
@@ -94,15 +95,22 @@ class HeroModel {
     final j = toJson();
     j.remove('model');
     j.remove('infoImage');
+    // Berkas unggahan hanya ada di perangkat admin; path-nya tidak berguna
+    // bagi perangkat lain dan justru membuat audio diam di sana.
+    if (FileHelper.isLocalFile(audio)) j['audio'] = '';
     return j;
   }
 
-  HeroModel copyWith({String? model, String? displayMode, String? infoImage}) =>
+  HeroModel copyWith(
+          {String? model,
+          String? displayMode,
+          String? infoImage,
+          String? audio}) =>
       HeroModel(
         name: name,
         coin: coin,
         image: image,
-        audio: audio,
+        audio: audio ?? this.audio,
         model: model ?? this.model,
         displayMode: displayMode ?? this.displayMode,
         infoImage: infoImage ?? this.infoImage,
@@ -235,6 +243,7 @@ int _syncMediaFromAssets(List<HeroModel> assetHeroes) {
   // pengenal, sehingga lebih mungkin konsisten daripada nama yang bebas diketik.
   final assetModels = <String, String>{};
   final assetInfoImages = <String, String>{};
+  final assetAudios = <String, String>{};
   for (final h in assetHeroes) {
     for (final k in [_matchKey(_heroKey(h)), _matchKey(h.label)]) {
       if (k.isEmpty) continue;
@@ -242,6 +251,7 @@ int _syncMediaFromAssets(List<HeroModel> assetHeroes) {
       if (h.infoImage.isNotEmpty) {
         assetInfoImages.putIfAbsent(k, () => h.infoImage);
       }
+      if (h.audio.isNotEmpty) assetAudios.putIfAbsent(k, () => h.audio);
     }
   }
 
@@ -250,6 +260,28 @@ int _syncMediaFromAssets(List<HeroModel> assetHeroes) {
     final byLabel = _matchKey(mockHeroes[i].label);
     final model = assetModels[byName] ?? assetModels[byLabel];
     final info = assetInfoImages[byName] ?? assetInfoImages[byLabel];
+    final audio = assetAudios[byName] ?? assetAudios[byLabel];
+
+    // Audio: berkas unggahan ('uploads/...') hanya ada di perangkat yang
+    // mengunggahnya, tetapi path-nya ikut tersimpan di Firestore. Di perangkat
+    // lain (dan di web) path itu tidak bisa diputar, sehingga audio diam.
+    // Audio dari assets selalu menang; path unggahan hanya dipertahankan bila
+    // tidak ada audio bawaan DAN berkasnya benar-benar ada di perangkat ini.
+    final current = mockHeroes[i].audio;
+    final String resolvedAudio;
+    if (audio != null) {
+      resolvedAudio = audio;
+    } else if (FileHelper.isLocalFile(current) &&
+        !FileHelper.localFileExists(current)) {
+      resolvedAudio = '';
+    } else {
+      resolvedAudio = current;
+    }
+    if (resolvedAudio != current) {
+      mockHeroes[i] = mockHeroes[i].copyWith(audio: resolvedAudio);
+      synced++;
+    }
+
     // Hanya MENGISI yang kosong, tidak menimpa. Sejak kedua field ini bisa
     // dipilih sendiri lewat Admin, menimpanya dari assets berarti pilihan
     // pengguna terhapus diam-diam setiap aplikasi dibuka.
@@ -281,7 +313,14 @@ Future<void> loadHeroes() async {
     // data terbaru saat berikutnya dibuka tanpa jaringan.
     final remote = await _fetchHeroesFromFirestore();
     if (remote != null && remote.isNotEmpty) {
-      mockHeroes = remote;
+      // DIGABUNG, bukan diganti. Sebelumnya isi Firestore menggantikan seluruh
+      // daftar, sehingga hero bawaan yang tidak ada di Firestore (koin 1000,
+      // 500, 200, 100, Semar) hilang dan tidak pernah dikenali pemindai.
+      final remoteKeys = remote.map(_heroKey).toSet();
+      mockHeroes = [
+        ...remote,
+        ...assetHeroes.where((h) => !remoteKeys.contains(_heroKey(h))),
+      ];
       _syncMediaFromAssets(assetHeroes);
       await prefs.setString(_kHeroesPrefsKey,
           json.encode(mockHeroes.map((h) => h.toJson()).toList()));

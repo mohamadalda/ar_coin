@@ -38,6 +38,17 @@ class FileHelper {
     return stored;
   }
 
+  /// True bila berkas unggahan benar-benar ada di perangkat ini.
+  /// Di web tidak ada sistem berkas lokal, jadi selalu false.
+  static bool localFileExists(String stored) {
+    if (kIsWeb || !isLocalFile(stored)) return false;
+    try {
+      return File(resolve(stored)).existsSync();
+    } catch (_) {
+      return false;
+    }
+  }
+
   /// Menyalin file ke Application Documents Directory agar permanen.
   /// prefix digunakan untuk membedakan antara image dan audio.
   static Future<String?> saveFileLocally(File sourceFile, String prefix) async {

@@ -234,6 +234,12 @@ class _ARScannerScreenState extends State<ARScannerScreen>
   void initState() {
     super.initState();
 
+    // Didaftarkan SEKALI. Sebelumnya listener ditambahkan setiap kali audio
+    // diputar, sehingga menumpuk selama layar pemindai terbuka.
+    _audioPlayer.onPlayerComplete.listen((_) {
+      if (mounted) setState(() => _isPlayingAudio = false);
+    });
+
     if (widget.testExpected != null) {
       _testStartedAt = DateTime.now();
       _testTimeout = Timer(_kTestTimeout, () {
@@ -589,13 +595,19 @@ class _ARScannerScreenState extends State<ARScannerScreen>
       } else {
         await _audioPlayer.play(AssetSource(hero.audio));
       }
-      setState(() => _isPlayingAudio = true);
-      _audioPlayer.onPlayerComplete.listen((_) {
-        if (mounted) setState(() => _isPlayingAudio = false);
-      });
+      if (mounted) setState(() => _isPlayingAudio = true);
     } catch (e) {
-      debugPrint('❌ Audio error: $e');
+      // Dulu gagal diam-diam, sehingga terlihat seperti fitur audio rusak
+      // padahal berkasnya yang tidak ada di perangkat ini.
+      debugPrint('❌ Audio error (${hero.audio}): $e');
+      if (!mounted) return;
       setState(() => _isPlayingAudio = false);
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(const SnackBar(
+          content: Text('Audio untuk koin ini tidak tersedia.'),
+          duration: Duration(seconds: 2),
+        ));
     }
   }
 
