@@ -2,10 +2,8 @@
 
 import 'dart:io';
 
-import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show AssetManifest, rootBundle;
-import 'package:file_picker/file_picker.dart';
 import '../models/hero_model.dart';
 import '../utils/file_helper.dart';
 import '../utils/firebase_service.dart';
@@ -24,6 +22,8 @@ class _AdminScreenState extends State<AdminScreen> {
   /// penyelarasan dari assets yang baru jalan saat aplikasi dibuka ulang.
   List<String> _modelAssets = [];
   List<String> _infoImageAssets = [];
+  List<String> _imageAssets = [];
+  List<String> _audioAssets = [];
 
   @override
   void initState() {
@@ -44,6 +44,24 @@ class _AdminScreenState extends State<AdminScreen> {
         _infoImageAssets = keys
             .where((k) =>
                 k.startsWith('assets/images/') && k.contains('_info.'))
+            .toList()
+          ..sort();
+        _imageAssets = keys
+            .where((k) =>
+                k.startsWith('assets/images/') && !k.contains('_info.'))
+            .toList()
+          ..sort();
+        // Awalan 'assets/' SENGAJA dibuang di sini.
+        //
+        // Nilai audio disimpan tanpa awalan itu karena AudioPlayer memakai
+        // AssetSource, yang menambahkannya sendiri — 'audio/Barong.mp3' akan
+        // dibaca sebagai 'assets/audio/Barong.mp3'. Menyimpan jalur penuh
+        // membuatnya dicari di 'assets/assets/audio/...' dan audionya diam
+        // tanpa pesan apa pun. Model 3D dan gambar tidak begini: keduanya
+        // memang disimpan dengan jalur penuh.
+        _audioAssets = keys
+            .where((k) => k.startsWith('assets/audio/'))
+            .map((k) => k.substring('assets/'.length))
             .toList()
           ..sort();
       });
@@ -318,115 +336,31 @@ class _AdminScreenState extends State<AdminScreen> {
                     ],
                     const SizedBox(height: 10),
                     
-                    // Upload Image
-                    Row(
-                      children: [
-                        Expanded(
-                          child: Text(
-                            currentImage.isEmpty ? 'Pilih Gambar...' : currentImage.split('/').last.split('\\').last,
-                            style: const TextStyle(color: Colors.white70),
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        ),
-                        ElevatedButton.icon(
-                          // Di web, PlatformFile.path SELALU null: berkasnya hidup
-                          // di memori browser, bukan di sistem berkas. Menyimpannya
-                          // butuh penyimpanan sisi browser (IndexedDB) yang belum ada,
-                          // jadi tombolnya dimatikan dengan alasan yang terbaca
-                          // daripada dibiarkan menelan klik tanpa akibat apa pun.
-                          onPressed: kIsWeb
-                              ? null
-                              : () async {
-                            final result = await FilePicker.pickFile(type: FileType.image);
-                            if (result?.path != null) {
-                              final path = await FileHelper.saveFileLocally(File(result!.path!), 'img');
-                              if (path != null) {
-                                // Delete old local file if replaced
-                                if (currentImage.isNotEmpty && currentImage != (hero?.image ?? '')) {
-                                  FileHelper.deleteLocalFile(currentImage);
-                                }
-                                setModalState(() {
-                                  currentImage = path;
-                                });
-                              }
-                            }
-                          },
-                          icon: const Icon(Icons.image),
-                          label: const Text('Upload'),
-                          style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF6A0DAD)),
-                        ),
-                        if (currentImage.isNotEmpty)
-                          IconButton(
-                            tooltip: 'Hapus gambar',
-                            icon: const Icon(Icons.delete_outline,
-                                color: Colors.redAccent),
-                            onPressed: () {
-                              // File yang baru diunggah dan belum disimpan langsung
-                              // dibuang di sini. File milik hero lama tidak disentuh —
-                              // pembersihannya sudah ditangani saat tombol Simpan.
-                              if (currentImage != (hero?.image ?? '')) {
-                                FileHelper.deleteLocalFile(currentImage);
-                              }
-                              setModalState(() => currentImage = '');
-                            },
-                          ),
-                      ],
+                    // Media hero dipilih dari aset yang IKUT DI DALAM
+                    // aplikasi, bukan diunggah dari perangkat.
+                    //
+                    // Tombol unggah dihapus karena menyesatkan: berkas yang
+                    // diunggah hanya tersalin ke folder dokumen aplikasi di
+                    // perangkat yang mengunggahnya, sementara yang tersimpan
+                    // di Firestore cuma jalurnya. Di perangkat lain jalur itu
+                    // menunjuk berkas yang tidak ada, pemutaran gagal diam-
+                    // diam, dan hero tampak tidak bersuara tanpa sebab yang
+                    // terlihat. Untuk menambah media baru, taruh berkasnya di
+                    // assets/ lalu terbitkan versi baru aplikasinya.
+                    _buildAssetPicker(
+                      title: 'Gambar',
+                      value: currentImage,
+                      options: _imageAssets,
+                      onChanged: (v) =>
+                          setModalState(() => currentImage = v ?? ''),
                     ),
                     const SizedBox(height: 10),
-
-                    // Upload Audio
-                    Row(
-                      children: [
-                        Expanded(
-                          child: Text(
-                            currentAudio.isEmpty ? 'Pilih Audio...' : currentAudio.split('/').last.split('\\').last,
-                            style: const TextStyle(color: Colors.white70),
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        ),
-                        ElevatedButton.icon(
-                          // Di web, PlatformFile.path SELALU null: berkasnya hidup
-                          // di memori browser, bukan di sistem berkas. Menyimpannya
-                          // butuh penyimpanan sisi browser (IndexedDB) yang belum ada,
-                          // jadi tombolnya dimatikan dengan alasan yang terbaca
-                          // daripada dibiarkan menelan klik tanpa akibat apa pun.
-                          onPressed: kIsWeb
-                              ? null
-                              : () async {
-                            final result = await FilePicker.pickFile(type: FileType.audio);
-                            if (result?.path != null) {
-                              final path = await FileHelper.saveFileLocally(File(result!.path!), 'aud');
-                              if (path != null) {
-                                // Delete old local file if replaced
-                                if (currentAudio.isNotEmpty && currentAudio != (hero?.audio ?? '')) {
-                                  FileHelper.deleteLocalFile(currentAudio);
-                                }
-                                setModalState(() {
-                                  currentAudio = path;
-                                });
-                              }
-                            }
-                          },
-                          icon: const Icon(Icons.audiotrack),
-                          label: const Text('Upload'),
-                          style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFD01B98)),
-                        ),
-                        if (currentAudio.isNotEmpty)
-                          IconButton(
-                            tooltip: 'Hapus audio',
-                            icon: const Icon(Icons.delete_outline,
-                                color: Colors.redAccent),
-                            onPressed: () {
-                              // File yang baru diunggah dan belum disimpan langsung
-                              // dibuang di sini. File milik hero lama tidak disentuh —
-                              // pembersihannya sudah ditangani saat tombol Simpan.
-                              if (currentAudio != (hero?.audio ?? '')) {
-                                FileHelper.deleteLocalFile(currentAudio);
-                              }
-                              setModalState(() => currentAudio = '');
-                            },
-                          ),
-                      ],
+                    _buildAssetPicker(
+                      title: 'Audio',
+                      value: currentAudio,
+                      options: _audioAssets,
+                      onChanged: (v) =>
+                          setModalState(() => currentAudio = v ?? ''),
                     ),
 
                     const SizedBox(height: 20),
