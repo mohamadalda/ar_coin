@@ -1,7 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:camera/camera.dart';
-import 'package:google_fonts/google_fonts.dart';
 import 'globals.dart';
 import 'screens/home_screen.dart';
 import 'models/hero_model.dart';
@@ -44,6 +43,9 @@ class ARCoinApp extends StatelessWidget {
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
         brightness: Brightness.dark,
+        // Font dibundel di aplikasi (lihat pubspec.yaml), bukan diunduh dari
+        // fonts.gstatic.com saat runtime.
+        fontFamily: 'Outfit',
         primaryColor: const Color(0xFF6A0DAD),
         colorScheme: ColorScheme.fromSeed(
           seedColor: const Color(0xFF6A0DAD),
@@ -51,7 +53,6 @@ class ARCoinApp extends StatelessWidget {
           secondary: const Color(0xFFD01B98),
           brightness: Brightness.dark,
         ),
-        textTheme: GoogleFonts.outfitTextTheme(ThemeData.dark().textTheme),
       ),
       home: const HomeScreen(),
     );

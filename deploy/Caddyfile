@@ -9,6 +9,14 @@
 	email {$ACME_EMAIL}
 }
 
+# Pengalihan HTTP -> HTTPS ditulis eksplisit. Pengalihan otomatis Caddy tidak
+# memakai blok header situs HTTPS, sehingga masih mengirim "Server: Caddy"
+# (pentest IMAGO temuan 9).
+http://{$DOMAIN} {
+	header -Server
+	redir https://{host}{uri} 308
+}
+
 {$DOMAIN} {
 	root * /srv
 	encode zstd gzip
@@ -42,9 +50,36 @@
 		Permissions-Policy "camera=(self), microphone=(), geolocation=()"
 		X-Content-Type-Options "nosniff"
 		Referrer-Policy "strict-origin-when-cross-origin"
-		Strict-Transport-Security "max-age=31536000"
+
+		# Temuan 13. `preload` sengaja TIDAK dipasang: daftar preload browser
+		# hanya menerima domain induk (peruri.co.id) dan mengikat SELURUH
+		# subdomain Peruri ke HTTPS — keputusan tim infra, bukan aplikasi ini.
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+
+		# Temuan 5: halaman tidak boleh dibingkai situs lain (clickjacking).
+		X-Frame-Options "DENY"
+
+		# Temuan 5 & 10: batasi sumber skrip dan tujuan koneksi.
+		#
+		# Masih REPORT-ONLY: pelanggaran hanya dicatat di konsol browser, tidak
+		# diblokir. Setelah diuji di HP dan konsol bersih, ganti nama header ini
+		# menjadi "Content-Security-Policy" untuk menegakkannya.
+		#
+		#   'wasm-unsafe-eval'  CanvasKit dan MediaPipe adalah WebAssembly.
+		#   fonts.gstatic.com   font cadangan engine Flutter untuk aksara yang
+		#                       tidak ada di Outfit (Jepang, Khmer, Arab, ...).
+		#   *.googleapis.com    Firestore dan Firebase Auth.
+		Content-Security-Policy-Report-Only "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' blob:; font-src 'self' data: https://fonts.gstatic.com; connect-src 'self' data: blob: https://fonts.gstatic.com https://firestore.googleapis.com https://identitytoolkit.googleapis.com https://securetoken.googleapis.com; worker-src 'self' blob:; frame-src 'none'; frame-ancestors 'none'; base-uri 'self'; form-action 'none'; object-src 'none'"
+
 		-Server
 	}
+
+	# ---- Berkas yang tidak boleh tersaji ----
+	#
+	# Temuan 7 & 9: berkas berawalan titik (.env, .git, ...) dan version.json
+	# (membocorkan versi aplikasi; tidak dipakai aplikasi ini) dibalas 404.
+	@tersembunyi path /.* /*/.* /version.json
+	respond @tersembunyi 404
 
 	# ---- Aturan cache ----
 	#
@@ -58,7 +93,7 @@
 	# tetap bernama main.dart.js di setiap build), jadi tidak ada mekanisme lain
 	# yang menyelamatkan. "no-cache" di sini berarti "boleh disimpan, tapi
 	# tanya dulu" — browser tetap menyimpannya dan balasan 304 itu murah.
-	@revalidasi path / /index.html /flutter_bootstrap.js /flutter_service_worker.js /version.json /main.dart.js /manifest.json /imago_camera.js /imago_detector.js /imago_model.js
+	@revalidasi path / /index.html /flutter_bootstrap.js /flutter_service_worker.js /main.dart.js /manifest.json /imago_camera.js /imago_detector.js /imago_model.js /imago_vendor.js
 	header @revalidasi Cache-Control "no-cache"
 
 	# CanvasKit hanya berubah saat versi Flutter naik, dan ia berkas terbesar
@@ -72,6 +107,16 @@
 	@aset path /assets/*
 	header @aset Cache-Control "public, max-age=86400"
 
-	try_files {path} /index.html
-	file_server
+	# Pustaka pihak ketiga yang disimpan sendiri; versinya ada di path,
+	# jadi aman di-cache lama.
+	@vendor path /vendor/*
+	header @vendor Cache-Control "public, max-age=2592000"
+
+	# Temuan 7: TIDAK ada lagi `try_files {path} /index.html`. Aplikasi memakai
+	# URL hash (/#/...), jadi browser tidak pernah meminta rute selain "/".
+	# Alamat yang tidak ada dibalas 404 apa adanya, sehingga pemindaian
+	# berkas sensitif terlihat jelas di log.
+	file_server {
+		hide .*
+	}
 }

@@ -101,13 +101,16 @@
     templatnya di web, jadi ia harus dimuat sendiri — tanpa ini elemen
     <model-viewer> tetap elemen tak dikenal dan hanya tampil sebagai kotak
     kosong, tanpa pesan kesalahan apa pun.
+
+    Disimpan sendiri di server (pentest temuan 10), diambil dan diperiksa
+    SHA-256-nya saat build oleh tool/fetch_web_vendor.sh.
   -->
-  <script type="module"
-          src="https://cdn.jsdelivr.net/npm/@google/model-viewer@4.0.0/dist/model-viewer.min.js"></script>
+  <script type="module" src="vendor/model-viewer/4.4.0/model-viewer.min.js"></script>
 
   <script src="imago_camera.js"></script>
   <script src="imago_detector.js"></script>
   <script src="imago_model.js"></script>
-  <script src="flutter_bootstrap.js" async></script>
+  <!-- Memuat Firebase SDK lokal, lalu flutter_bootstrap.js. -->
+  <script src="imago_vendor.js"></script>
 </body>
 </html>

@@ -43,8 +43,23 @@ REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 cd "$REPO_DIR"
 
+echo "==> Ambil pustaka web (diperiksa SHA-256)"
+bash tool/fetch_web_vendor.sh
+
 echo "==> Build web"
-flutter build web --release
+# --no-web-resources-cdn: CanvasKit ikut di build/web dan dimuat dari server
+# sendiri, bukan dari www.gstatic.com (pentest IMAGO temuan 10).
+flutter build web --release --no-web-resources-cdn
+
+# version.json hanya membocorkan versi aplikasi (temuan 9) dan tidak dipakai
+# aplikasi ini. Caddy juga menolaknya, tapi lebih baik tidak ikut terkirim.
+rm -f build/web/version.json
+
+# Pemeriksaan akhir: tidak boleh ada rujukan CDN tersisa di halaman utama.
+if grep -qE 'cdn\.jsdelivr\.net|unpkg\.com' build/web/index.html build/web/*.js; then
+  echo "!! build/web masih memuat pustaka dari CDN publik." >&2
+  exit 1
+fi
 
 # Pemeriksaan ini ada karena kegagalannya tidak kelihatan sampai demo:
 # aplikasi tetap tampil normal, hanya scanner-nya yang diam saja.

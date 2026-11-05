@@ -41,7 +41,6 @@ dependencies:
   cupertino_icons: ^1.0.2
   camera: ^0.10.5+9
   permission_handler: ^11.0.1
-  google_fonts: ^8.2.1
   animate_do: ^3.0.2
   glassmorphism: ^3.0.0
   google_mlkit_image_labeling: ^0.12.0
@@ -106,25 +105,18 @@ flutter:
   # For details regarding adding assets from package dependencies, see
   # https://flutter.dev/assets-and-images/#from-packages
 
-  # To add custom fonts to your application, add a fonts section here,
-  # in this "flutter" section. Each entry in this list should have a
-  # "family" key with the font family name, and a "fonts" key with a
-  # list giving the asset and other descriptors for the font. For
-  # example:
-  # fonts:
-  #   - family: Schyler
-  #     fonts:
-  #       - asset: fonts/Schyler-Regular.ttf
-  #       - asset: fonts/Schyler-Italic.ttf
-  #         style: italic
-  #   - family: Trajan Pro
-  #     fonts:
-  #       - asset: fonts/TrajanPro.ttf
-  #       - asset: fonts/TrajanPro_Bold.ttf
-  #         weight: 700
-  #
-  # For details regarding fonts from package dependencies,
-  # see https://flutter.dev/custom-fonts/#from-packages
+  # Font Outfit ikut di dalam aplikasi, menggantikan paket google_fonts yang
+  # mengunduhnya dari fonts.gstatic.com setiap kali aplikasi dibuka
+  # (pentest IMAGO temuan 11). Hanya bobot yang benar-benar dipakai kode:
+  # normal (400), w600, dan bold (700). Lisensi: assets/fonts/outfit/OFL.txt.
+  fonts:
+    - family: Outfit
+      fonts:
+        - asset: assets/fonts/outfit/Outfit-Regular.ttf
+        - asset: assets/fonts/outfit/Outfit-SemiBold.ttf
+          weight: 600
+        - asset: assets/fonts/outfit/Outfit-Bold.ttf
+          weight: 700
 
 # Konfigurasi ikon peluncur. Jalankan ulang setelah mengubah logo:
 #   dart run flutter_launcher_icons

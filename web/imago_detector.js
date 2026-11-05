@@ -18,8 +18,12 @@
 (function () {
   'use strict';
 
+  // Disimpan sendiri di server IMAGO (pentest temuan 10). import() dinamis
+  // tidak bisa membawa atribut integrity, jadi berkasnya diambil dan diperiksa
+  // SHA-256-nya saat build oleh tool/fetch_web_vendor.sh.
   var TASKS_VERSION = '0.10.14';
-  var CDN = 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@' + TASKS_VERSION;
+  var BASE = new URL('vendor/mediapipe/' + TASKS_VERSION + '/', document.baseURI).href;
+  var BUNDLE = BASE + 'vision_bundle.mjs';
 
   var classifier = null;
   var running = false;
@@ -96,9 +100,9 @@
     /// Mengembalikan { ok, error }.
     init: function (modelPath) {
       if (classifier) return Promise.resolve({ ok: true, error: null });
-      return import(CDN)
+      return import(BUNDLE)
         .then(function (mod) {
-          return mod.FilesetResolver.forVisionTasks(CDN + '/wasm')
+          return mod.FilesetResolver.forVisionTasks(BASE + 'wasm')
             .then(function (fileset) {
               return mod.ImageClassifier.createFromOptions(fileset, {
                 baseOptions: { modelAssetPath: modelPath },

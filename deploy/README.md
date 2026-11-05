@@ -202,7 +202,25 @@ ssh root@1.2.3.4 'cd /srv/imago && docker compose logs -f caddy'
 | Halaman terbuka, scanner diam | Dibuka lewat `http://` atau IP, bukan domain HTTPS |
 | Kamera ditolak terus | Izin situs pernah diblokir — reset lewat ikon gembok di bilah alamat |
 | Login Firebase gagal | Domain belum masuk Authorized domains (langkah 5) |
-| Koin tidak pernah dikenali | MediaPipe diambil dari CDN; perlu internet di perangkat |
+| Koin tidak pernah dikenali | `web/vendor/` kosong saat build — jalankan `bash tool/fetch_web_vendor.sh` (otomatis di `deploy.sh`) |
+| `fetch_web_vendor.sh` berhenti: HASH TIDAK COCOK | Isi berkas di CDN berubah. JANGAN dilewati — selidiki dulu sebelum memperbarui hash |
+
+## Keamanan (tindak lanjut pentest IMAGO, 4 Nov 2026)
+
+- **Pustaka pihak ketiga disimpan sendiri.** model-viewer, MediaPipe (beserta
+  WASM-nya), dan Firebase JS SDK diambil saat build oleh
+  `tool/fetch_web_vendor.sh` ke `web/vendor/`, dengan SHA-256 yang dikunci.
+  CanvasKit ikut di build (`--no-web-resources-cdn`). Font Outfit dibundel di
+  aplikasi. Satu-satunya CDN yang tersisa adalah font cadangan engine Flutter
+  (`fonts.gstatic.com`) untuk aksara non-Latin di pemilih bahasa.
+- **CSP masih Report-Only.** Setelah diuji di HP (scan koin, model 3D, login
+  admin) dan tidak ada pelanggaran di konsol, ubah nama header
+  `Content-Security-Policy-Report-Only` di Caddyfile menjadi
+  `Content-Security-Policy`.
+- **Tidak ada fallback ke `index.html`.** Aplikasi memakai URL hash, jadi
+  alamat yang tidak ada dibalas 404. Berkas bertitik dan `version.json` juga
+  404.
+- **`.env` tidak masuk git**, hanya `.env.example`.
 | Deploy baru tapi tampilan lama | Harusnya tidak terjadi — aturan cache di Caddyfile mencegahnya. Kalau tetap, hapus data situs di browser |
 
 ## Soal batas Let's Encrypt
