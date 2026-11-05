@@ -1,9 +1,12 @@
 import 'dart:convert';
+import 'dart:io' show File;
+
 import 'package:flutter/services.dart';
 import 'package:flutter/foundation.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../utils/file_helper.dart';
 import '../utils/firebase_service.dart';
 
 class HeroModel {
@@ -96,12 +99,17 @@ class HeroModel {
     return j;
   }
 
-  HeroModel copyWith({String? model, String? displayMode, String? infoImage}) =>
+  HeroModel copyWith({
+    String? audio,
+    String? model,
+    String? displayMode,
+    String? infoImage,
+  }) =>
       HeroModel(
         name: name,
         coin: coin,
         image: image,
-        audio: audio,
+        audio: audio ?? this.audio,
         model: model ?? this.model,
         displayMode: displayMode ?? this.displayMode,
         infoImage: infoImage ?? this.infoImage,
@@ -203,6 +211,7 @@ int _syncMediaFromAssets(List<HeroModel> assetHeroes) {
   // pengenal, sehingga lebih mungkin konsisten daripada nama yang bebas diketik.
   final assetModels = <String, String>{};
   final assetInfoImages = <String, String>{};
+  final assetAudio = <String, String>{};
   for (final h in assetHeroes) {
     for (final k in [_matchKey(_heroKey(h)), _matchKey(h.label)]) {
       if (k.isEmpty) continue;
@@ -210,6 +219,7 @@ int _syncMediaFromAssets(List<HeroModel> assetHeroes) {
       if (h.infoImage.isNotEmpty) {
         assetInfoImages.putIfAbsent(k, () => h.infoImage);
       }
+      if (h.audio.isNotEmpty) assetAudio.putIfAbsent(k, () => h.audio);
     }
   }
 
@@ -218,6 +228,7 @@ int _syncMediaFromAssets(List<HeroModel> assetHeroes) {
     final byLabel = _matchKey(mockHeroes[i].label);
     final model = assetModels[byName] ?? assetModels[byLabel];
     final info = assetInfoImages[byName] ?? assetInfoImages[byLabel];
+    final audio = assetAudio[byName] ?? assetAudio[byLabel];
     // Hanya MENGISI yang kosong, tidak menimpa. Sejak kedua field ini bisa
     // dipilih sendiri lewat Admin, menimpanya dari assets berarti pilihan
     // pengguna terhapus diam-diam setiap aplikasi dibuka.
@@ -229,8 +240,39 @@ int _syncMediaFromAssets(List<HeroModel> assetHeroes) {
       mockHeroes[i] = mockHeroes[i].copyWith(infoImage: info);
       synced++;
     }
+    // Audio: diisi saat kosong, DAN diperbaiki saat menunjuk berkas unggahan
+    // yang tidak ada di perangkat ini.
+    //
+    // Yang kedua itu penting. Berkas yang diunggah lewat Admin hanya disalin
+    // ke folder dokumen aplikasi di perangkat yang mengunggahnya — isinya
+    // tidak pernah dikirim ke mana pun. Yang sampai ke Firestore cuma
+    // path-nya, misalnya 'uploads/aud_1792485395289_Barong.mp3'. Di perangkat
+    // lain path itu menunjuk berkas yang tidak ada, pemutarannya melempar,
+    // dan kesalahannya ditelan sehingga yang terlihat hanyalah audio yang
+    // tidak pernah berbunyi.
+    if (audio != null &&
+        (mockHeroes[i].audio.isEmpty || _berkasUnggahanHilang(mockHeroes[i].audio))) {
+      mockHeroes[i] = mockHeroes[i].copyWith(audio: audio);
+      synced++;
+    }
   }
   return synced;
+}
+
+/// True bila [stored] menunjuk berkas unggahan yang tidak ada di perangkat ini.
+///
+/// Aset bawaan aplikasi selalu dianggap ada — keberadaannya dijamin bundel,
+/// dan memeriksanya butuh pembacaan asinkron yang tidak tersedia di sini.
+bool _berkasUnggahanHilang(String stored) {
+  if (!FileHelper.isLocalFile(stored)) return false;
+  // Di web tidak ada berkas unggahan sama sekali: penyimpanannya belum ada di
+  // sana, jadi path semacam ini pasti mati.
+  if (kIsWeb) return true;
+  try {
+    return !File(FileHelper.resolve(stored)).existsSync();
+  } catch (_) {
+    return true;
+  }
 }
 
 Future<void> loadHeroes() async {
