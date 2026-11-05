@@ -1,0 +1,3 @@
+# Skrip shell harus LF di semua mesin. Dengan CRLF (bawaan Git di Windows),
+# bash gagal dengan "$'\r': command not found".
+*.sh text eol=lf
