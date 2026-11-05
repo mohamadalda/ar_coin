@@ -70,6 +70,8 @@ firebase-debug.log
 # diterbitkan ulang.
 deploy/cert/
 deploy/certs/
+# Arsip kiriman sertifikat (mis. deploy/cert.zip) biasanya berisi kunci privat.
+deploy/*.zip
 *.key
 *.pem
 *.pfx
