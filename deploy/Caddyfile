@@ -1,0 +1,77 @@
+# Caddy dipilih, bukan nginx + certbot, karena ia mengurus sertifikat sendiri
+# tanpa cron job maupun container tambahan.
+#
+# HTTPS di sini bukan pemanis keamanan: getUserMedia hanya tersedia di konteks
+# aman, jadi tanpa sertifikat yang DIPERCAYA PERANGKAT, seluruh pemindaian koin
+# mati sementara halamannya tetap tampil normal.
+
+{
+	email {$ACME_EMAIL}
+}
+
+{$DOMAIN} {
+	root * /srv
+	encode zstd gzip
+
+	# ---- Sumber sertifikat ----
+	#
+	# Server ini hanya hidup di DNS internal Peruri: imago.peruri.co.id
+	# menunjuk 10.30.12.65 dari dalam jaringan, tapi NXDOMAIN dari internet.
+	# Let's Encrypt dan ZeroSSL memverifikasi lewat DNS publik, jadi keduanya
+	# TIDAK AKAN PERNAH bisa menerbitkan sertifikat untuk nama ini — termasuk
+	# lewat DNS-01, karena zona publiknya pun tidak mengenal subdomainnya.
+	#
+	# Pilihan TLS_MODE:
+	#   internal                      CA milik Caddy sendiri. Perangkat yang
+	#                                 memasang root CA-nya mempercayai penuh,
+	#                                 sehingga kamera berfungsi normal.
+	#   /certs/nama.crt /certs/nama.key
+	#                                 Sertifikat dari CA internal Peruri, bila
+	#                                 ada. Ini yang terbaik: root CA-nya
+	#                                 biasanya sudah terpasang di perangkat
+	#                                 kantor, jadi tidak perlu dipasang manual.
+	#
+	# Untuk Let's Encrypt (hanya bila nanti ada DNS publik yang mengarah ke
+	# sini), HAPUS baris tls di bawah seluruhnya.
+	tls {$TLS_MODE:internal}
+
+	header {
+		# Kamera diizinkan HANYA untuk halaman ini sendiri. Tanpa baris ini
+		# sebagian browser/proxy memasang kebijakan bawaan yang lebih ketat
+		# dan permintaan kamera ditolak tanpa penjelasan di layar.
+		Permissions-Policy "camera=(self), microphone=(), geolocation=()"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		Strict-Transport-Security "max-age=31536000"
+		-Server
+	}
+
+	# ---- Aturan cache ----
+	#
+	# flutter_bootstrap.js mendaftarkan service worker, dan service worker itu
+	# yang memutuskan kapan aset lama dibuang. Kalau berkas-berkas di bawah ini
+	# ikut di-cache lama oleh browser, service worker TIDAK PERNAH tahu ada
+	# versi baru — kamu men-deploy, lalu pengunjung tetap melihat aplikasi lama
+	# dan tidak ada cara memaksanya selain membersihkan data situs.
+	#
+	# Nama berkas Flutter untuk web tidak mengandung hash isi (main.dart.js
+	# tetap bernama main.dart.js di setiap build), jadi tidak ada mekanisme lain
+	# yang menyelamatkan. "no-cache" di sini berarti "boleh disimpan, tapi
+	# tanya dulu" — browser tetap menyimpannya dan balasan 304 itu murah.
+	@revalidasi path / /index.html /flutter_bootstrap.js /flutter_service_worker.js /version.json /main.dart.js /manifest.json /imago_camera.js /imago_detector.js /imago_model.js
+	header @revalidasi Cache-Control "no-cache"
+
+	# CanvasKit hanya berubah saat versi Flutter naik, dan ia berkas terbesar
+	# yang diunduh (~7 MB sebelum kompresi). Aman di-cache lama.
+	@canvaskit path /canvaskit/*
+	header @canvaskit Cache-Control "public, max-age=2592000"
+
+	# Aset aplikasi: model 3D, gambar, model TFLite. Sehari cukup — kalau kamu
+	# mengganti GLB, pengunjung melihat yang baru keesokan harinya tanpa perlu
+	# apa-apa.
+	@aset path /assets/*
+	header @aset Cache-Control "public, max-age=86400"
+
+	try_files {path} /index.html
+	file_server
+}

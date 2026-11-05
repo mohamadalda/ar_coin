@@ -19,7 +19,11 @@ publish_to: 'none' # Remove this line if you wish to publish to pub.dev
 version: 1.0.0+2
 
 environment:
-  sdk: '>=3.0.6 <4.0.0'
+  # Lantai dinaikkan dari 3.0.6 ke 3.3.0 untuk extension type, yang dipakai
+  # jembatan js_interop di lib/platform/. Ini hanya batas MINIMUM — compiler
+  # yang dipakai tetap sama (Dart 3.12.2), jadi keluaran build mobile tidak
+  # berubah. Tidak ada fitur baru yang dipakai di jalur kode mobile.
+  sdk: '>=3.3.0 <4.0.0'
 
 # Dependencies specify other packages that your package needs in order to work.
 # To automatically upgrade your package dependencies to the latest versions
@@ -54,6 +58,10 @@ dependencies:
   cloud_firestore: ^7.0.0
   firebase_auth: ^7.0.0
   path: ^1.9.1
+  # Sudah ada sebagai dependensi transitif; dideklarasikan eksplisit karena
+  # lib/platform/web_download_web.dart mengimpornya langsung. Hanya terpakai
+  # di target web — berkas itu tidak pernah dikompilasi di mobile.
+  web: ^1.1.1
 
 dev_dependencies:
   flutter_test:
@@ -79,7 +87,15 @@ flutter:
   uses-material-design: true
 
   assets:
-    - assets/
+    # Didaftarkan satu per satu, BUKAN dengan glob `assets/`.
+    #
+    # Glob itu memborong seluruh isi folder, termasuk yang tidak pernah dipakai:
+    # dua salinan model bertimestamp hasil ekspor ulang (@2 MB), sebuah .zip
+    # ekspor (532 KB), model vww_96_grayscale yang tidak terpakai (531 KB) dan
+    # .DS_Store. Semuanya ikut terkirim ke setiap pengguna — ~5 MB di APK Play
+    # Store dan ~5 MB unduhan percuma di web.
+    - assets/heroes.json
+    - assets/coin_model.tflite
     - assets/images/
     - assets/audio/
     - assets/models/

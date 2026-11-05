@@ -1,59 +1,113 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <!--
-    If you are serving your web app in a path other than the root, change the
-    href value below to reflect the base path you are serving from.
-
-    The path provided below has to start and end with a slash "/" in order for
-    it to work correctly.
-
-    For more details:
-    * https://developer.mozilla.org/en-US/docs/Web/HTML/Element/base
-
-    This is a placeholder for base href that will be replaced by the value of
-    the `--base-href` argument provided to `flutter build`.
-  -->
   <base href="$FLUTTER_BASE_HREF">
 
   <meta charset="UTF-8">
   <meta content="IE=Edge" http-equiv="X-UA-Compatible">
-  <meta name="description" content="A new Flutter project.">
+  <meta name="description" content="IMAGO — pindai koin komemoratif untuk melihat profil tokoh dalam format Augmented Reality.">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <meta name="theme-color" content="#120B1F">
 
   <!-- iOS meta tags & icons -->
   <meta name="apple-mobile-web-app-capable" content="yes">
-  <meta name="apple-mobile-web-app-status-bar-style" content="black">
-  <meta name="apple-mobile-web-app-title" content="app_imago">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="IMAGO">
   <link rel="apple-touch-icon" href="icons/Icon-192.png">
 
-  <!-- Favicon -->
   <link rel="icon" type="image/png" href="favicon.png"/>
 
-  <title>app_imago</title>
+  <title>IMAGO</title>
   <link rel="manifest" href="manifest.json">
 
-  <script>
-    // The value below is injected by flutter build, do not touch.
-    var serviceWorkerVersion = null;
-  </script>
-  <!-- This script adds the flutter initialization JS code -->
-  <script src="flutter.js" defer></script>
+  <style>
+    html, body {
+      margin: 0;
+      padding: 0;
+      height: 100%;
+      overflow: hidden;
+      background-color: #120B1F;
+    }
+
+    /*
+      Lapisan kamera.
+
+      Elemen ini SENGAJA berada di luar Flutter, bukan sebagai platform view.
+      Dua alasan:
+
+      1. camera_web tidak bisa melakukan startImageStream (flutter#92460), dan
+         elemen <video> internalnya privat — tidak terjangkau dari kode aplikasi.
+         Detektor butuh elemen ini secara langsung untuk menggambar frame ke
+         canvas, jadi kita yang harus memilikinya.
+
+      2. Platform view yang bertumpuk memaksa engine Flutter memecah kanvasnya
+         di tiap persilangan z-order. Dengan menaruh video di BELAKANG kanvas
+         dan membuat kanvasnya transparan, Flutter cukup melukis HUD di atas —
+         nol platform view, nol pemecahan kanvas.
+
+      playsinline + muted wajib di iOS Safari, kalau tidak videonya dipaksa
+      fullscreen oleh sistem.
+    */
+    #imago-camera {
+      position: fixed;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      background-color: #000;
+      z-index: 0;
+      display: none;
+    }
+
+    /*
+      Aset 3D. Elemen DOM biasa, BUKAN platform view, dengan alasan yang sama
+      dengan lapisan kamera. Posisinya ditulis dari Dart memakai nilai anchor
+      yang sama dengan yang memposisikan panel keterangan, sehingga keduanya
+      tidak mungkin berbeda tempat.
+    */
+    #imago-model {
+      position: fixed;
+      z-index: 1;
+      background-color: transparent;
+      visibility: hidden;
+      --progress-bar-color: transparent;
+    }
+
+    /*
+      Bilah progres bawaan model-viewer digambar selebar penuh di tepi atas
+      elemennya, dan tampak sebagai garis panjang melintang di atas aset.
+    */
+    #imago-model::part(default-progress-bar) {
+      display: none !important;
+    }
+
+    /*
+      Kanvas Flutter melukis HUD di atas kedua lapisan DOM di atas.
+
+      HANYA z-index. Jangan sentuh `position`: Flutter menulis
+      `position: absolute; inset: 0` sendiri sebagai gaya inline, dan
+      menimpanya di sini berarti berebut layout dengan engine-nya.
+    */
+    flutter-view {
+      z-index: 2;
+    }
+  </style>
 </head>
 <body>
-  <script>
-    window.addEventListener('load', function(ev) {
-      // Download main.dart.js
-      _flutter.loader.loadEntrypoint({
-        serviceWorker: {
-          serviceWorkerVersion: serviceWorkerVersion,
-        },
-        onEntrypointLoaded: function(engineInitializer) {
-          engineInitializer.initializeEngine().then(function(appRunner) {
-            appRunner.runApp();
-          });
-        }
-      });
-    });
-  </script>
+  <video id="imago-camera" playsinline muted autoplay></video>
+
+  <!--
+    Pustaka model-viewer. model_viewer_plus justru MENGHAPUS tag ini dari
+    templatnya di web, jadi ia harus dimuat sendiri — tanpa ini elemen
+    <model-viewer> tetap elemen tak dikenal dan hanya tampil sebagai kotak
+    kosong, tanpa pesan kesalahan apa pun.
+  -->
+  <script type="module"
+          src="https://cdn.jsdelivr.net/npm/@google/model-viewer@4.0.0/dist/model-viewer.min.js"></script>
+
+  <script src="imago_camera.js"></script>
+  <script src="imago_detector.js"></script>
+  <script src="imago_model.js"></script>
+  <script src="flutter_bootstrap.js" async></script>
 </body>
 </html>

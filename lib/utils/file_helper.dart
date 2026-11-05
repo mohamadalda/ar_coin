@@ -12,8 +12,20 @@ class FileHelper {
   static const String _uploadsPrefix = 'uploads/';
 
   /// Wajib dipanggil sekali saat aplikasi start, sebelum data hero dibaca.
+  ///
+  /// BOLEH gagal. Di web tidak ada folder dokumen aplikasi — path_provider
+  /// tidak punya implementasi di sana dan melempar MissingPluginException.
+  /// Karena pemanggilnya ada di main() SEBELUM runApp(), sebuah lemparan di
+  /// sini akan mematikan aplikasi sebelum satu piksel pun tampil. Jadi di web
+  /// kita lewati, dan di mobile pun kegagalannya ditelan: [resolve] akan
+  /// mengembalikan path apa adanya dan hanya berkas unggahan yang terdampak.
   static Future<void> init() async {
-    _docsDir = (await getApplicationDocumentsDirectory()).path;
+    if (kIsWeb) return;
+    try {
+      _docsDir = (await getApplicationDocumentsDirectory()).path;
+    } catch (e) {
+      debugPrint('Folder dokumen aplikasi tidak tersedia: $e');
+    }
   }
 
   /// Mengecek apakah string path merujuk ke file lokal di storage perangkat

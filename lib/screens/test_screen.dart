@@ -1,5 +1,6 @@
 import 'dart:io';
 
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:path_provider/path_provider.dart';
@@ -7,6 +8,7 @@ import 'package:share_plus/share_plus.dart';
 
 import '../models/hero_model.dart';
 import '../models/test_record.dart';
+import '../platform/web_download.dart';
 import 'scanner_screen.dart';
 
 /// Halaman pengujian akurasi pengenalan.
@@ -90,6 +92,22 @@ class _TestScreenState extends State<TestScreen> {
 
   Future<void> _exportCsv() async {
     final csv = TestSummary(_records).toCsv();
+
+    // Di web yang dibutuhkan bukan "bagikan" melainkan "simpan": berkasnya
+    // dipakai untuk lampiran KTI. getTemporaryDirectory() juga akan melempar
+    // di sana, jadi jalur di bawah memang tidak bisa dipakai.
+    if (kIsWeb) {
+      final ok = downloadTextFile(
+          'hasil_pengujian_imago.csv', csv, 'text/csv;charset=utf-8');
+      if (!ok) {
+        await Clipboard.setData(ClipboardData(text: csv));
+        if (mounted) _toast('Unduhan gagal, CSV disalin ke clipboard.');
+      } else if (mounted) {
+        _toast('CSV diunduh.');
+      }
+      return;
+    }
+
     try {
       final dir = await getTemporaryDirectory();
       final file = File('${dir.path}/hasil_pengujian_imago.csv');
