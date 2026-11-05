@@ -190,6 +190,21 @@ openssl rsa  -in imago.key -noout -modulus | openssl md5
 VPS_HOST=root@1.2.3.4 ./deploy/deploy.sh
 ```
 
+**Dari Windows:** jalankan dari **PowerShell**, bukan Git Bash:
+
+```powershell
+.\deploy\deploy_windows.ps1
+```
+
+Flutter yang dipanggil dari Git Bash gagal mengompilasi ("Error when reading
+.../Pub/Cache/..."), jadi skrip itu mem-build dari PowerShell lalu memanggil
+`deploy.sh` dengan `SKIP_BUILD=1` hanya untuk mengirim. rsync juga tidak ada di
+Windows, sehingga berkas dikirim sebagai arsip tar lewat ssh, dan kata sandi
+SSH ditanyakan di setiap langkah (sekitar empat kali).
+
+Container selalu dibuat ulang (`--force-recreate`) supaya perubahan Caddyfile
+ikut berlaku; situs mati beberapa detik saat itu.
+
 ## Kalau ada yang salah
 
 ```bash
@@ -204,6 +219,7 @@ ssh root@1.2.3.4 'cd /srv/imago && docker compose logs -f caddy'
 | Login Firebase gagal | Domain belum masuk Authorized domains (langkah 5) |
 | Koin tidak pernah dikenali | `web/vendor/` kosong saat build — jalankan `bash tool/fetch_web_vendor.sh` (otomatis di `deploy.sh`) |
 | `fetch_web_vendor.sh` berhenti: HASH TIDAK COCOK | Isi berkas di CDN berubah. JANGAN dilewati — selidiki dulu sebelum memperbarui hash |
+| Deploy baru tapi tampilan lama | Harusnya tidak terjadi — aturan cache di Caddyfile mencegahnya. Kalau tetap, hapus data situs di browser |
 
 ## Keamanan (tindak lanjut pentest IMAGO, 4 Nov 2026)
 
@@ -221,7 +237,6 @@ ssh root@1.2.3.4 'cd /srv/imago && docker compose logs -f caddy'
   alamat yang tidak ada dibalas 404. Berkas bertitik dan `version.json` juga
   404.
 - **`.env` tidak masuk git**, hanya `.env.example`.
-| Deploy baru tapi tampilan lama | Harusnya tidak terjadi — aturan cache di Caddyfile mencegahnya. Kalau tetap, hapus data situs di browser |
 
 ## Soal batas Let's Encrypt
 
