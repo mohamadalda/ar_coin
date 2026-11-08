@@ -70,6 +70,10 @@ firebase-debug.log
 # diterbitkan ulang.
 deploy/cert/
 deploy/certs/
+# Dokumen tindak lanjut pentest berklasifikasi Rahasia — tidak masuk git.
+docs/TINDAK_LANJUT_PENTEST_IMAGO.md
+PR_DESCRIPTION.md
+
 # Arsip kiriman sertifikat (mis. deploy/cert.zip) biasanya berisi kunci privat.
 deploy/*.zip
 *.key
