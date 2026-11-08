@@ -28,6 +28,19 @@ import 'package:firebase_core/firebase_core.dart';
 /// disembunyikan di aplikasi sisi klien. Yang menjaga data tetap aman adalah
 /// Firestore Security Rules dan daftar Authorized domains di Authentication,
 /// bukan kerahasiaan nilai ini.
+/// Site key reCAPTCHA Enterprise untuk Firebase App Check di web (pentest
+/// temuan 4). Kunci "IMAGO web App Check" di Google Cloud → Security →
+/// Fraud Defense, proyek imago-3137c, hanya berlaku untuk imago.peruri.co.id.
+///
+/// Site key memang publik — ia ikut terkirim ke browser. Tidak ada secret
+/// key: reCAPTCHA Enterprise dinilai langsung oleh App Check di proyek yang
+/// sama.
+///
+/// Null berarti App Check tidak diaktifkan. Selama App Check di-enforce di
+/// Console, build web tanpa site key akan ditolak Firestore dan Auth.
+// ignore: unnecessary_nullable_for_final_variable_declarations
+const String? kWebRecaptchaSiteKey = '6Ld1MBYuAAAAAIEhGISRS2-PTZcWdEuCoUkccgHE';
+
 // Tipenya SENGAJA nullable meski sekarang terisi: nilai null adalah jalur
 // "belum dikonfigurasi" yang dibaca FirebaseService, dan jalur itu harus tetap
 // hidup supaya siapa pun yang meng-clone repo ini tanpa project Firebase

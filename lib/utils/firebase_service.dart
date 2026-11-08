@@ -1,3 +1,4 @@
+import 'package:firebase_app_check/firebase_app_check.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/foundation.dart';
 import '../firebase_options_web.dart';
@@ -33,6 +34,18 @@ class FirebaseService {
           return;
         }
         await Firebase.initializeApp(options: kWebFirebaseOptions);
+
+        // App Check (pentest temuan 4): setiap panggilan ke Firestore dan
+        // Auth membawa token yang membuktikan asalnya dari halaman IMAGO
+        // yang sah, sehingga kunci API yang terbaca publik tidak cukup untuk
+        // memakai layanan proyek dari skrip lain. Harus aktif SEBELUM
+        // Firestore/Auth dipakai pertama kali.
+        final siteKey = kWebRecaptchaSiteKey;
+        if (siteKey != null) {
+          await FirebaseAppCheck.instance.activate(
+            providerWeb: ReCaptchaEnterpriseProvider(siteKey),
+          );
+        }
       } else {
         // Jalur mobile TIDAK BERUBAH: konfigurasi dibaca dari
         // google-services.json / GoogleService-Info.plist seperti semula.

@@ -61,6 +61,7 @@ dependencies:
   # lib/platform/web_download_web.dart mengimpornya langsung. Hanya terpakai
   # di target web — berkas itu tidak pernah dikompilasi di mobile.
   web: ^1.1.1
+  firebase_app_check: ^0.5.1
 
 dev_dependencies:
   flutter_test:

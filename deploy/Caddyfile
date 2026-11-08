@@ -59,17 +59,18 @@ http://{$DOMAIN} {
 		# Temuan 5: halaman tidak boleh dibingkai situs lain (clickjacking).
 		X-Frame-Options "DENY"
 
-		# Temuan 5 & 10: batasi sumber skrip dan tujuan koneksi.
-		#
-		# Masih REPORT-ONLY: pelanggaran hanya dicatat di konsol browser, tidak
-		# diblokir. Setelah diuji di HP dan konsol bersih, ganti nama header ini
-		# menjadi "Content-Security-Policy" untuk menegakkannya.
+		# Temuan 5 & 10: batasi sumber skrip dan tujuan koneksi. DITEGAKKAN
+		# (bukan lagi Report-Only) setelah uji tanpa pelanggaran.
 		#
 		#   'wasm-unsafe-eval'  CanvasKit dan MediaPipe adalah WebAssembly.
 		#   fonts.gstatic.com   font cadangan engine Flutter untuk aksara yang
 		#                       tidak ada di Outfit (Jepang, Khmer, Arab, ...).
-		#   *.googleapis.com    Firestore dan Firebase Auth.
-		Content-Security-Policy-Report-Only "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' blob:; font-src 'self' data: https://fonts.gstatic.com; connect-src 'self' data: blob: https://fonts.gstatic.com https://firestore.googleapis.com https://identitytoolkit.googleapis.com https://securetoken.googleapis.com; worker-src 'self' blob:; frame-src 'none'; frame-ancestors 'none'; base-uri 'self'; form-action 'none'; object-src 'none'"
+		#   *.googleapis.com    Firestore, Firebase Auth, dan App Check.
+		#   google.com/recaptcha, gstatic.com/recaptcha
+		#                       reCAPTCHA Enterprise untuk App Check (temuan 4). Satu-
+		#                       satunya skrip pihak ketiga yang tersisa: Google
+		#                       tidak mengizinkan reCAPTCHA disimpan sendiri.
+		Content-Security-Policy "default-src 'self'; script-src 'self' 'wasm-unsafe-eval' https://www.google.com/recaptcha/ https://www.gstatic.com/recaptcha/; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' blob:; font-src 'self' data: https://fonts.gstatic.com; connect-src 'self' data: blob: https://fonts.gstatic.com https://firestore.googleapis.com https://identitytoolkit.googleapis.com https://securetoken.googleapis.com https://content-firebaseappcheck.googleapis.com https://www.google.com/recaptcha/; worker-src 'self' blob:; frame-src https://www.google.com/recaptcha/ https://recaptcha.google.com/recaptcha/; frame-ancestors 'none'; base-uri 'self'; form-action 'none'; object-src 'none'"
 
 		-Server
 	}

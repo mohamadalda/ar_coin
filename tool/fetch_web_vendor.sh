@@ -42,6 +42,7 @@ abe9b6fbeaf86fcb53a5edce3926c82ccb0619e18fed4d9d9ce561ee7f55e054 $MP/wasm/vision
 7cb48cbc5728f220562d05bd0aab8c17d8bda03c599ad8cb4ad0f042e4f65765 $FB/firebase-app.js firebase/$FB_VER/firebase-app.js
 286224de4d870ef55e4301f718488fa77f146d60d6953b3a76f9a3883669b34a $FB/firebase-auth.js firebase/$FB_VER/firebase-auth.js
 689fe30b1b7c878d71c808c582703b86355b7efe9e5269bfe129883a6c7d41a9 $FB/firebase-firestore-pipelines.js firebase/$FB_VER/firebase-firestore-pipelines.js
+eb521d7ce76254e7f5aef24ec6b660452bc986028ff0efaba3476220b5a03472 $FB/firebase-app-check.js firebase/$FB_VER/firebase-app-check.js
 "
 
 if command -v sha256sum >/dev/null 2>&1; then

@@ -9,7 +9,7 @@
  * Mekanismenya resmi dari plugin: bila window.firebase_core sudah ada saat
  * Firebase.initializeApp() dipanggil, plugin menganggap skrip sudah dimuat
  * pemilik halaman dan TIDAK menyuntikkan apa pun. Nama variabelnya mengikuti
- * plugin: firebase_core, firebase_auth, firebase_firestore.
+ * plugin: firebase_core, firebase_auth, firebase_firestore, firebase_app_check.
  *
  * flutter_bootstrap.js sengaja baru dimuat SETELAH ketiganya siap. Kalau
  * dimuat bersamaan, main() bisa memanggil initializeApp() lebih dulu dan
@@ -45,11 +45,16 @@
       return Promise.all([
         import(url(FB + 'firebase-auth.js')),
         import(url(FB + 'firebase-firestore-pipelines.js')),
+        // App Check (pentest temuan 4). Bundel ini sendiri memuat skrip
+        // reCAPTCHA dari www.google.com — satu-satunya yang tidak bisa
+        // disimpan sendiri, dan diizinkan terbatas di CSP.
+        import(url(FB + 'firebase-app-check.js')),
       ]);
     })
     .then(function (mods) {
       window.firebase_auth = mods[0];
       window.firebase_firestore = mods[1];
+      window.firebase_app_check = mods[2];
     })
     .catch(function (e) {
       console.error(
@@ -60,6 +65,7 @@
       delete window.firebase_core;
       delete window.firebase_auth;
       delete window.firebase_firestore;
+      delete window.firebase_app_check;
     })
     .then(startFlutter);
 })();
