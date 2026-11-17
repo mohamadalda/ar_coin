@@ -1,3 +1,4 @@
+import 'package:firebase_app_check/firebase_app_check.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/foundation.dart';
 import '../firebase_options_web.dart';
@@ -41,10 +42,59 @@ class FirebaseService {
       _ready = true;
       _lastError = null;
       debugPrint('✅ Firebase siap');
+
+      // Harus setelah initializeApp dan sebelum panggilan Auth/Firestore
+      // pertama: begitu enforcement menyala, permintaan tanpa token App Check
+      // ditolak 401 sebelum kredensial sempat diperiksa.
+      await _aktifkanAppCheck();
     } catch (e) {
       _ready = false;
       _lastError = '$e';
       debugPrint('ℹ️ Firebase tidak aktif, memakai penyimpanan lokal: $e');
+    }
+  }
+
+  /// Alasan App Check gagal diaktifkan, atau null bila aman.
+  static String? get appCheckError => _appCheckError;
+  static String? _appCheckError;
+
+  /// Memasang penyedia bukti-keaslian aplikasi.
+  ///
+  /// Di rilis, Android memakai Play Integrity dan Apple memakai App Attest.
+  /// Di build debug keduanya memakai penyedia debug, karena Play Integrity
+  /// hanya mengenali APK yang ditandatangani Play dan App Attest hanya
+  /// mengenali build dari TestFlight/App Store — tanpa ini, setiap sesi
+  /// pengembangan akan ditolak.
+  ///
+  /// Kegagalan di sini TIDAK fatal, mengikuti aturan kelas ini. Tapi perlu
+  /// dicatat: bila enforcement sudah menyala di console sementara aktivasi di
+  /// sini gagal, gejalanya muncul jauh dari sebabnya — sebagai "sandi salah"
+  /// di layar login.
+  static Future<void> _aktifkanAppCheck() async {
+    try {
+      if (kIsWeb && kWebRecaptchaSiteKey == null) {
+        _appCheckError = 'Site key reCAPTCHA belum diisi, App Check web '
+            'dilewati (lihat lib/firebase_options_web.dart)';
+        debugPrint('ℹ️ $_appCheckError');
+        return;
+      }
+
+      await FirebaseAppCheck.instance.activate(
+        providerAndroid: kDebugMode
+            ? const AndroidDebugProvider()
+            : const AndroidPlayIntegrityProvider(),
+        providerApple: kDebugMode
+            ? const AppleDebugProvider()
+            : const AppleAppAttestProvider(),
+        providerWeb: kWebRecaptchaSiteKey == null
+            ? null
+            : ReCaptchaV3Provider(kWebRecaptchaSiteKey!),
+      );
+      _appCheckError = null;
+      debugPrint('✅ App Check aktif (${kDebugMode ? 'debug' : 'rilis'})');
+    } catch (e) {
+      _appCheckError = '$e';
+      debugPrint('⚠️ App Check gagal diaktifkan: $e');
     }
   }
 

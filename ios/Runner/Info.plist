@@ -72,5 +72,19 @@
 	</array>
 	<key>UIViewControllerBasedStatusBarAppearance</key>
 	<false/>
+	<!-- Google Sign-In memanggil balik aplikasi lewat skema ini.
+	     Nilainya = REVERSED_CLIENT_ID di GoogleService-Info.plist;
+	     bila plist diganti, skema ini harus ikut diperbarui. -->
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleTypeRole</key>
+			<string>Editor</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>com.googleusercontent.apps.1008830387025-9n3dlud2ihgoq0sk3ve4qbor8i0p9rk9</string>
+			</array>
+		</dict>
+	</array>
 </dict>
 </plist>

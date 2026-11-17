@@ -42,3 +42,10 @@ const FirebaseOptions? kWebFirebaseOptions = FirebaseOptions(
   storageBucket: 'imago-3137c.firebasestorage.app',
   measurementId: 'G-E6Y8E8HBCE',
 );
+
+/// Site key reCAPTCHA v3 untuk App Check di web.
+///
+/// Dibuat di Firebase Console → App Check → aplikasi web → reCAPTCHA v3.
+/// Selama masih null, App Check tidak diaktifkan di web: lebih baik web
+/// berjalan tanpa App Check daripada setiap permintaannya ditolak diam-diam.
+const String? kWebRecaptchaSiteKey = null;
